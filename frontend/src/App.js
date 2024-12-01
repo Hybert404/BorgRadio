@@ -1,17 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { createRoot } from 'react-dom/client';
 import axios from 'axios';
-
-window.addEventListener('load', () => {
-  const audio = document.querySelector('audio');
-  audio.play().catch((error) => {
-    console.error('Autoplay failed:', error);
-  });
-});
 
 const MusicPlayer = () => {
   const [url, setUrl] = useState('');
-  const [audioUrl, setAudioUrl] = useState('');
   const [queue, setQueue] = useState([]);
   const [response, setResponse] = useState('');
   const [message, setMessage] = useState('');
@@ -106,15 +97,26 @@ const MusicPlayer = () => {
     };
 
     ws.onmessage = (event) => {
-      if (event.data == 'fetchQueue'){
+      const data = JSON.parse(event.data);
+      const now = new Date();
+      const time = `${now.getHours()}:${now.getMinutes()}:${now.getSeconds()}.${now.getMilliseconds()}`;
+      console.log(`${time} [WebSocket] Event: ${data.event}, Message: ${data.message}`);
+
+      if (data.event === 'track-ended') {
+        console.log('The track has ended. Ready for the next track.');
+      } else if (data.event === 'track-skipped') {
+        console.log('The track was skipped.');
+      } else if (data.event === 'refresh') {
         fetchQueue();
-      }
+      };
       setResponse(event.data);
     };
 
-    // return () => {
-    //   ws.close();
-    // };
+    // Cleanup on component unmount
+    return () => {
+      ws.close();
+      console.log('Disconnected from server');
+    };
   }, []);
   //websocket
   // const sendMessage = () => {
@@ -165,7 +167,7 @@ const MusicPlayer = () => {
       </ul>
 
       <h3>Now Playing</h3>
-      <audio controls autoplay>
+      <audio controls>
         <source src="http://localhost:5000/stream" type="audio/mpeg" />
         Your browser does not support the audio element.
       </audio>
