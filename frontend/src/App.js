@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 
 const MusicPlayer = () => {
@@ -6,6 +6,9 @@ const MusicPlayer = () => {
   const [queue, setQueue] = useState([]);
   const [response, setResponse] = useState('');
   const [message, setMessage] = useState('');
+  const [audioSrc, setAudioSrc] = useState("http://localhost:5000/stream"); // State to manage the audio source
+  const audioRef = useRef(null); // Reference to the audio player
+  const [isUserInteracted, setIsUserInteracted] = useState(false); // Track user interaction
 
   const pastelink = () => {
     const links = [
@@ -85,6 +88,20 @@ const MusicPlayer = () => {
     }
   };
 
+  const handleUserInteraction = () => {
+    setIsUserInteracted(true);
+    if (audioRef.current) {
+      audioRef.current.play();
+    }
+  };
+
+  const reloadMusic = () => {
+    if (audioRef.current) {
+      audioRef.current.load();
+      audioRef.current.play()
+    }
+  };
+
   useEffect(() => {
     fetchQueue();  // Fetch queue when the component loads
 
@@ -106,8 +123,20 @@ const MusicPlayer = () => {
         console.log('The track has ended. Ready for the next track.');
       } else if (data.event === 'track-skipped') {
         console.log('The track was skipped.');
+        if (audioRef.current) {
+          audioRef.current.pause();
+        }
       } else if (data.event === 'refresh') {
         fetchQueue();
+      } else if (data.event === 'playing') {
+        console.log('Refreshing audio source and playing.');
+        // setAudioSrc(data.message); // Update the source if required
+        if (audioRef.current) {
+          audioRef.current.load(); // Reload the audio element
+          audioRef.current.play().catch((err) => {
+            console.error('Autoplay failed:', err);
+          }); // Start playing
+        }
       };
       setResponse(event.data);
     };
@@ -167,8 +196,12 @@ const MusicPlayer = () => {
       </ul>
 
       <h3>Now Playing</h3>
-      <audio controls>
-        <source src="http://localhost:5000/stream" type="audio/mpeg" />
+      {!isUserInteracted && (
+        <button onClick={handleUserInteraction}>Start Audio</button>
+      )}
+      <button onClick={reloadMusic}>Reload Audio</button>
+      <audio controls ref={audioRef}>
+        <source src={audioSrc} type="audio/mpeg" />
         Your browser does not support the audio element.
       </audio>
       

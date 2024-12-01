@@ -286,7 +286,7 @@ const processQueue = () => {
 }
 
 // Get next song from the queue, process streaming url and save it to db
-const processNextFromQueue = () => {
+const processNextFromQueue = async () => {
   // Find the first pending item in the queue
   return new Promise((resolve, reject) => {
     db.get(`SELECT * FROM queue WHERE status = 'pending' ORDER BY id LIMIT 1`, (err, item) => {
@@ -317,6 +317,7 @@ const processNextFromQueue = () => {
           const { title, audioUrl } = await getAudioUrlAndTitle(item.url);
           db.run(`UPDATE queue SET status = 'processed', audioUrl = ?, title = ? WHERE id = ?`, [audioUrl, title, item.id]);
           sendFetchNotification();
+          await currentlyPlaying();
         } catch (error) {
           console.error(`[processNextFromQueue] Error: `, error.message);
         }
