@@ -6,7 +6,7 @@ const MusicPlayer = () => {
   const [queue, setQueue] = useState([]);
   const [response, setResponse] = useState('');
   const [message, setMessage] = useState('');
-  const [audioSrc, setAudioSrc] = useState("http://localhost:5000/stream"); // State to manage the audio source
+  const [audioSrc, setAudioSrc] = useState(''); // State to manage the audio source
   const audioRef = useRef(null); // Reference to the audio player
   const [isUserInteracted, setIsUserInteracted] = useState(false); // Track user interaction
 
@@ -128,15 +128,16 @@ const MusicPlayer = () => {
         }
       } else if (data.event === 'refresh') {
         fetchQueue();
-      } else if (data.event === 'playing') {
-        console.log('Refreshing audio source and playing.');
-        // setAudioSrc(data.message); // Update the source if required
-        if (audioRef.current) {
-          audioRef.current.load(); // Reload the audio element
-          audioRef.current.play().catch((err) => {
-            console.error('Autoplay failed:', err);
-          }); // Start playing
-        }
+      } else if (data.event === 'play') {
+        setAudioSrc(data.message); // Update the source if required
+        audioRef.current.load(); // Reload the audio element
+        // autoplay muted and unmute next (bypass autoplay block)
+        audioRef.current.muted = true;
+        audioRef.current.play().then(() => {
+          audioRef.current.muted = false;
+        }).catch((err) => {
+          console.error('Autoplay failed:', err);
+        }); // Start playing
       };
       setResponse(event.data);
     };
@@ -169,6 +170,13 @@ const MusicPlayer = () => {
     }
   };
 
+  const formatDuration = (durationInSeconds) => {
+    if (!durationInSeconds) return '00:00';
+    const minutes = Math.floor(durationInSeconds / 60);
+    const seconds = Math.floor(durationInSeconds % 60);
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  };
+
   return (
     <div style={{width: 1000, margin: "0 auto"}}>
       <h2>Queue Manager</h2>
@@ -190,7 +198,8 @@ const MusicPlayer = () => {
       <ul>
         {queue.map((item) => (
           <li key={item.id}>
-            {item.title ? `${item.title} - `:''} {item.url} - {item.status} {item.audioUrl ? <a href={item.audioUrl} target="_blank"><button>Open audio url</button></a> : ''}
+            {item.title ? `${item.title} - `:''} 
+            {item.url} - {formatDuration(item.duration)} - {item.status} {item.audioUrl ? <a href={item.audioUrl} target="_blank"><button>Open audio url</button></a> : ''}
           </li> 
         ))}
       </ul>
