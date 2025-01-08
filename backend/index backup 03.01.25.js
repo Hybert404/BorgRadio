@@ -112,17 +112,18 @@ const play = async () => {
     _currentAudio.state = "play";
     console.log(`[play] currently playing: ${currPlaying}`);
     _currentAudio.duration = JSON.parse(currPlaying).duration;
-    broadcastMessage({ event: 'play', message: currPlaying });
+    broadcastMessage({ event: 'play', message: JSON.parse(currPlaying).audioUrl });
     _currentAudio.startIndexIncrement();
   }
 }
 
 const next = async () => {
   _currentAudio.state = "pause";
-  await stopPlaying();
+  await setTrackStatusToFinish();
   let currPlaying = await currentlyPlaying();
   if(currPlaying != null){
     _currentAudio.state = "play";
+    play();
     broadcastMessage({ event: 'play', message: JSON.parse(currPlaying).audioUrl });
     _currentAudio.startIndexIncrement();
   }else{
@@ -154,6 +155,7 @@ const getDuration = async (url) => {
       return(null);
   }
 }
+
 
 // Get audio stream URL
 app.post('/process', async (req, res) => {
@@ -230,6 +232,7 @@ app.post('/queue/add', (req, res) => {
   });
 });
 
+
 // Function to skip the current track
 const skipTrack = async (res) => {
     console.log('[skipTrack] Skipping current track.');
@@ -259,7 +262,6 @@ app.post('/queue/clear', (req, res) => {
     res.json({ message: 'Queue cleared' });
   });
 });
-
 
 // Get next song from the queue, process streaming url and save it to db
 const processNextFromQueue = async () => {
@@ -333,7 +335,7 @@ const reprocessRowById = async (id) => {
 };
 
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------currently playing
-// returns object item where status = 'playing'
+// returns object item where status = 'playing', NOTHING PLAYING = FETCHING NEXT PROCESSED, NOTHING PROCESSED = RETURN NULL
 const currentlyPlaying = () => {
   return new Promise((resolve, reject) => {
     db.get(`SELECT * FROM queue WHERE status = 'playing' ORDER BY id LIMIT 1`, (err, item) => {
@@ -372,27 +374,26 @@ const currentlyPlaying = () => {
   });
 };
 
-const stopPlaying = async () => {
+const setTrackStatusToFinish = () => {
   return new Promise((resolve, reject) => {
     db.all(`SELECT * FROM queue WHERE status = 'playing' ORDER BY id`, (err, items) => {
       if (err) {
-        console.error('[stopPlaying] Error accessing queue:', err);
-        console.log('[stopPlaying] Retrying...');
-        setTimeout(stopPlaying, 5000); // Retry after delay on error
-        resolve(err);
+        console.error('[setTrackStatusToFinish] Error accessing queue:', err);
+        reject(err);
         return;
       }
       if (!items || items.length === 0) {
-        console.log('[stopPlaying] Nothing currently playing.');
-        resolve(null);
+        console.log('[setTrackStatusToFinish] Nothing currently playing.');
+        reject(null);
         return;
       }
       items.forEach((item) => {
         db.run(`UPDATE queue SET status = 'finished' WHERE id = ?`, [item.id]);
-        console.log(`[stopPlaying] Skipped item with id=${item.id}`);
+        console.log(`[setTrackStatusToFinish] Skipped item with id=${item.id}`);
+        // audioStream.kill('SIGTERM');
         sendFetchNotification();
-        resolve(true);
       });
+      resolve();
     });
   });
 }
@@ -435,7 +436,9 @@ const isQueueEmpty = () => {
     });
   });
 }
-// --------------------------------
+
+
+
 
 // shorten links from error messages
 function formatError(err) {

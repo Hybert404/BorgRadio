@@ -19,13 +19,14 @@ class currentAudio {
     if (this.state === "play" && !this.timer) {
       this.timer = setInterval(() => {
         this.index += 1;
-        console.log(`Index incremented to: ${this.index}`);
 
         // If duration is set and index reaches duration, reset the timer
         if (this.duration != null && this.index >= this.duration) {
           this.resetIndexIncrement();
           next();
         }
+
+        console.log(`Index incremented to: ${this.index}`);
       }, 1000);
     }
   }
@@ -112,14 +113,14 @@ const play = async () => {
     _currentAudio.state = "play";
     console.log(`[play] currently playing: ${currPlaying}`);
     _currentAudio.duration = JSON.parse(currPlaying).duration;
-    broadcastMessage({ event: 'play', message: currPlaying });
+    broadcastMessage({ event: 'play', message: JSON.parse(currPlaying).audioUrl });
     _currentAudio.startIndexIncrement();
   }
 }
 
 const next = async () => {
   _currentAudio.state = "pause";
-  await stopPlaying();
+  stopPlaying();
   let currPlaying = await currentlyPlaying();
   if(currPlaying != null){
     _currentAudio.state = "play";
@@ -154,6 +155,87 @@ const getDuration = async (url) => {
       return(null);
   }
 }
+
+// ------------STREAM / BROADCAST----------------------------------
+
+// Function to stream audio to the client
+// const streamAudio = async (res) => {
+//   try {
+//       let currPlaying = await currentlyPlaying();
+//       if (currPlaying == null) {
+//           console.log('[streamAudio] No audio currently playing.');
+//           broadcastMessage({ event: 'no-audio', message: 'No audio currently playing.' });
+//           return;
+//       }
+
+//       let audioUrl = JSON.parse(currPlaying).audioUrl;
+//       processNextFromQueue(); // Cache next URL
+
+//       // Terminate any existing FFmpeg instance
+//       if (audioStream) {
+//           console.log('[streamAudio] Terminating previous FFmpeg instance.');
+//           audioStream.kill('SIGTERM');
+//           audioStream = null;
+//       }
+
+//       // Create a new FFmpeg instance for streaming
+//       audioStream = ffmpeg(audioUrl)
+//           .audioCodec('libmp3lame')
+//           .format('mp3')
+//           .on('end', () => {
+//               console.log('[streamAudio] Track ended.');
+//               broadcastMessage({ event: 'track-ended', message: 'Track has ended.' });
+//               stopPlaying();
+//               streamAudio(res); // Start the next track
+//           })
+//           .on('error', async (err) => {
+//               console.error('[streamAudio] FFmpeg error:', err.message);
+
+//               if (err.message.includes('403 Forbidden')) {
+//                   console.log('[streamAudio] Reprocessing audio URL...');
+//                   let currPlaying = await currentlyPlaying();
+//                   let idToReprocess = JSON.parse(currPlaying).id;
+//                   await reprocessRowById(idToReprocess);
+//                   console.log('[streamAudio] Reprocessing finished.');
+//                   streamAudio(res);
+//               } else {
+//                   broadcastMessage({ event: 'error', message: 'Error during streaming.' });
+//               }
+//           });
+
+//       console.log('[streamAudio] Streaming audio to client.');
+//       audioStream.pipe(res);
+//       broadcastMessage({ event: 'playing', message: `Streaming started: ${JSON.parse(currPlaying).title}` });
+//   } catch (error) {
+//       console.error('[streamAudio] Error:', error);
+//       broadcastMessage({ event: 'error', message: 'Unable to stream audio.' });
+//   }
+// };
+
+
+
+// Stream endpoint
+// app.get('/stream', (req, res) => {
+//   res.setHeader('Content-Type', 'audio/mpeg');
+//   // (async () => {
+//   //   try {
+//   //     const audioUrl = await currentlyPlaying()[1];
+//   //     if (audioUrl) {
+//   //       console.log(`[/stream] Currently playing URL: ${audioUrl.slice(0,100)}...`);
+//   //     } else {
+//   //       console.log('[/stream] No audio currently playing.');
+//   //       await processNextFromQueue();
+//   //     }
+//   //   } catch (error) {
+//   //     console.error('[/stream] Error retrieving currently playing audio:', error);
+//   //   }
+//   // })();
+//   streamAudio(res);
+// });
+//---------------------------------------------------------------
+
+
+
 
 // Get audio stream URL
 app.post('/process', async (req, res) => {
@@ -230,6 +312,35 @@ app.post('/queue/add', (req, res) => {
   });
 });
 
+// Skip the Current Song
+// app.post('/queue/skip', (req, res) => {
+//   stopPlaying();
+//   (async () => {
+//     try {
+//       const audioUrl = await currentlyPlaying()[1];
+//       if (audioUrl) {
+//         // console.log('[/queue/skip] Currently playing URL:', audioUrl);
+//       } else {
+//         console.log('[/queue/skip] No audio currently playing.');
+//         return;
+//       }
+//     } catch (error) {
+//       console.error('[/queue/skip] Error retrieving currently playing audio:', error);
+//     }
+//   })();
+//   res.json({ message: 'Song skipped' });
+// });
+
+// Skip function to transition to the next track
+// const skipTrack = async (res) => {
+//   console.log('[skipTrack] Skipping current track...');
+//   if (audioStream) {
+//     audioStream.kill('SIGTERM'); // Stop the current track
+//     stopPlaying();
+//   }
+//   streamAudio(res); // Start the next track
+// };
+
 // Function to skip the current track
 const skipTrack = async (res) => {
     console.log('[skipTrack] Skipping current track.');
@@ -260,6 +371,21 @@ app.post('/queue/clear', (req, res) => {
   });
 });
 
+
+// if something is playing, skip processing
+// const processQueue = () => {
+//   db.get(`SELECT * FROM queue WHERE status = 'playing' ORDER BY id LIMIT 1`, (err, item) => {
+//     if (err) {
+//       console.error('[processQueue] Error accessing queue:', err);
+//       console.log('[processQueue] Retrying...');
+//       setTimeout(processQueue, 5000); // Retry after delay on error
+//       return;
+//     }
+//     if (!item) {
+//       processNextFromQueue();
+//     }
+//   });
+// }
 
 // Get next song from the queue, process streaming url and save it to db
 const processNextFromQueue = async () => {
@@ -379,19 +505,17 @@ const stopPlaying = async () => {
         console.error('[stopPlaying] Error accessing queue:', err);
         console.log('[stopPlaying] Retrying...');
         setTimeout(stopPlaying, 5000); // Retry after delay on error
-        resolve(err);
         return;
       }
       if (!items || items.length === 0) {
         console.log('[stopPlaying] Nothing currently playing.');
-        resolve(null);
         return;
       }
       items.forEach((item) => {
         db.run(`UPDATE queue SET status = 'finished' WHERE id = ?`, [item.id]);
         console.log(`[stopPlaying] Skipped item with id=${item.id}`);
+        // audioStream.kill('SIGTERM');
         sendFetchNotification();
-        resolve(true);
       });
     });
   });
@@ -436,6 +560,35 @@ const isQueueEmpty = () => {
   });
 }
 // --------------------------------
+
+//po co ta funkcja debilu
+// const processTitle = (id, ws) =>{
+//   db.get(`SELECT * FROM queue WHERE id = ? ORDER BY id LIMIT 1`, [id], (err, item) => {
+//     if (err) {
+//       console.error(`DB error trying to find row with ID=${id}`, err);
+//       return;
+//     }
+//     if (!item) {
+//       console.error(`No item found with ID=${id}`);
+//       return;
+//     }
+
+//     getAudioStreamURL(item.url).then(({ title, audioUrl }) =>{
+//       if(title != '' && title != null){
+//         if(title.startsWith('https://')){ // temp bug fix
+//           processTitle(id, ws);
+//           return;
+//         }
+//         db.run(`UPDATE queue SET title = ? WHERE id = ?`, [title, id]);
+//         console.log(`Title for id ${item.id} set.`);
+
+//         sendFetchNotification();
+//       }
+//     });
+//   });
+// }
+
+
 
 // shorten links from error messages
 function formatError(err) {
