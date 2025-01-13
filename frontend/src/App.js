@@ -11,15 +11,33 @@ import { Box, Button, TextField, LinearProgress, Divider, Typography } from '@mu
 import SendIcon from '@mui/icons-material/Send';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SkipNextIcon from '@mui/icons-material/SkipNext';
+import SkipPreviousIcon from '@mui/icons-material/SkipPrevious';
 import InsertLinkIcon from '@mui/icons-material/InsertLink';
+import CheckIcon from '@mui/icons-material/Check';
+import PlayCircleIcon from '@mui/icons-material/PlayCircle';
+import CircularProgress from '@mui/material/CircularProgress';
+import DoneAllIcon from '@mui/icons-material/DoneAll';
+import QueueIcon from '@mui/icons-material/Queue';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import PauseIcon from '@mui/icons-material/Pause';
+import Fab from '@mui/material/Fab';
+import IconButton from '@mui/material/IconButton';
+import CloseIcon from '@mui/icons-material/Close';
+import '@fontsource/roboto';
+<link
+  rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap"
+/>
 
-const LinearProgressWithLabel = ({ value, currentTime, duration }) => {
+const LinearProgressWithLabel = ({ currentTime, duration }) => {
   // Format time (seconds) into mm:ss
   const formatTime = (timeInSeconds) => {
     const minutes = Math.floor(timeInSeconds / 60);
     const seconds = timeInSeconds % 60;
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
+
+  const value = (currentTime / duration) * 100;
 
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -32,6 +50,7 @@ const LinearProgressWithLabel = ({ value, currentTime, duration }) => {
     </Box>
   );
 };
+
 
 const MusicPlayer = () => {
   const [url, setUrl] = useState('');
@@ -49,6 +68,7 @@ const MusicPlayer = () => {
     duration: 0,  // in seconds
     currentTime: 0,
   });
+  const [isPlaying, setIsPlaying] = useState(false);
 
   const pastelink = () => {
     const links = [
@@ -148,6 +168,12 @@ const MusicPlayer = () => {
       const now = new Date();
       const time = `${now.getHours()}:${now.getMinutes()}:${now.getSeconds()}.${now.getMilliseconds()}`;
       console.log(`[WS] Event: ${data.event}, Message: ${data.message}`);
+      let msg;
+      try {
+        msg = JSON.parse(data.message);
+      } catch (e) {
+        msg = null; // Handle or ignore invalid JSON
+      }
 
       switch (data.event) {
         case 'track-ended':
@@ -165,39 +191,44 @@ const MusicPlayer = () => {
           fetchQueue();
           break;
         
-          case 'play':
-            setAudioSrc(data.message); // Update the source (e.g., new song URL or data)
-            
-            // Assuming `data.message` includes the new song details like title, duration, etc.
-            setCurrentSong({
-              id: data.message.id,
-              url: data.message.url,
-              title: data.message.title,
-              audiourl: data.message.audioUrl,
-              duration: data.message.duration, // Ensure you have the correct fields
-              currentTime: 0,  // Starting at the beginning of the new track
-            });
-      
-            if (audioRef.current) {
-              audioRef.current.load(); // Reload the audio element to play the new song
+        case 'play':
+          if (audioRef.current) {
+            // Stop current playback and clear interval if applicable
+            audioRef.current.pause();
+            if (audioRef.current.intervalId) {
+              clearInterval(audioRef.current.intervalId);
             }
-      
-            // Start updating currentTime with interval
-            const intervalId = setInterval(() => {
-              setCurrentSong((prevSong) => {
-                if (prevSong.currentTime < prevSong.duration) {
-                  return { ...prevSong, currentTime: prevSong.currentTime + 1 };
-                } else {
-                  clearInterval(intervalId); // Clear interval when track ends
-                  return prevSong;
-                }
-              });
-            }, 1000);
-      
-            // Store the interval ID in a ref so we can clear it later if necessary
-            audioRef.current.intervalId = intervalId;
-            break;      
         
+            // Set new source and reload
+            setAudioSrc(msg.audioUrl);
+            setCurrentSong({
+              id: msg.id,
+              url: msg.url,
+              title: msg.title,
+              audiourl: msg.audioUrl,
+              duration: msg.duration,
+              currentTime: 0,
+            });
+        
+            // Use event to safely start playback after loading
+            const handleLoadedData = () => {
+              audioRef.current.play().catch((err) => {
+                console.error("Error playing audio:", err);
+              });
+            };
+        
+            audioRef.current.addEventListener('loadeddata', handleLoadedData);
+        
+            // Clean up to prevent memory leaks
+            audioRef.current.onended = () => {
+              clearInterval(audioRef.current.intervalId);
+              audioRef.current.removeEventListener('loadeddata', handleLoadedData);
+            };
+        
+            audioRef.current.load(); // Trigger loading of the new source
+          }
+          break;
+          
         default:
           console.log('Unhandled event type:', data.event);
           break;
@@ -238,7 +269,7 @@ const MusicPlayer = () => {
   };
 
   const shortenUrl = (url) => {
-    const maxLength = 30;
+    const maxLength = 55;
     if (!url) return '';  // Return an empty string if url is null or undefined
     return url.length > maxLength ? `${url.substring(0, maxLength)}...` : url;
   };
@@ -258,27 +289,100 @@ const MusicPlayer = () => {
     return () => clearInterval(interval);
   }, [currentSong.duration]);
 
-  const progress = (currentSong.currentTime / currentSong.duration) * 100;
+  const progress = currentSong.duration > 0 
+  ? (currentSong.currentTime / currentSong.duration) * 100 
+  : 100;
+
+  const handleTogglePlayPause = () => {
+    setIsPlaying(!isPlaying);
+  };
+
+  const handleDelete = async (id) => {
+    setQueue((prevQueue) => prevQueue.filter(item => item.id !== id));
+    try {
+      await axios.post('http://localhost:5000/queue/remove', {id});
+      fetchQueue();  // Refresh queue after clearing
+    } catch (error) {
+      console.error('Error clearing queue:', error);
+    }
+  };
+  
+  const handlePlay = (id) => {
+    const songToPlay = queue.find(item => item.id === id);
+    if (songToPlay) {
+      
+    }
+  };
 
   return (
-    <TableContainer component={Paper} sx={{ width: '90%', margin: 'auto' }}>
-      <h2>Queue Manager</h2>
-      
-      <Box sx={{ width: '50%', padding: 2, textAlign: 'center', margin: 'auto' }}>
-        <Typography variant="h6" sx={{ marginBottom: 1 }}>
-          Currently Playing
-        </Typography>
-        <Typography variant="body1" sx={{ marginBottom: 1 }}>
-          {currentSong.title}
-        </Typography>
+    <Box sx={{ display: 'flex', gap: 2, alignItems: 'left' }}>
+      <Box sx={{ id: 'left-panel', display: 'inline', width: '30%', marginTop: '20px', p:4}}>
+        <Box sx={{id: 'control-buttons',  gap: 1, marginTop: 2, marginBottom: 2}}>
+          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+            <TextField
+              variant='outlined'
+              size='small'
+              type="text"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="Enter YouTube URL"
+              sx={{ flex: 1 }}
+            />
+            <Button variant='contained' color='primary' onClick={addToQueue} startIcon={<QueueIcon />}>Add to Queue</Button>
+          </Box>
+          
+          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', marginTop: 2}}>
+            <Button variant='contained' color='error' onClick={clearQueue} startIcon={<DeleteIcon />}>Clear Queue</Button>
+            <Button variant='contained' color='primary' onClick={pasteTest} startIcon={<InsertLinkIcon />}>Paste test link</Button>
+          </Box>
+          {/* <Button variant='contained' color='primary' onClick={skipQueue} startIcon={<SkipNextIcon />}>Skip</Button> */}
+          
+        </Box>
 
-        <LinearProgressWithLabel 
-          value={progress} 
-          currentTime={currentSong.currentTime} 
-          duration={currentSong.duration} 
-        />
+        <Box component={Paper} sx={{ backgroundColor: '#F7F7F7', padding: 2, textAlign: 'center', borderRadius: 5}}>
+          <Typography variant="h6" sx={{ marginBottom: 1 }}>
+            Currently Playing
+          </Typography>
+          <Typography variant="body1" sx={{ marginBottom: 1 }}>
+            {currentSong.title}
+          </Typography>
+
+          <Box>
+            <Fab 
+              aria-label="previous" 
+              onClick={null}
+              size="small"
+            >
+              <SkipPreviousIcon fontSize="small" />
+            </Fab>
+            <Fab 
+              color="primary" 
+              aria-label={isPlaying ? 'pause' : 'play'} 
+              onClick={handleTogglePlayPause}
+              sx={{ margin: 1 }}
+              size="big"
+            >
+              {isPlaying ? <PauseIcon /> : <PlayArrowIcon />}
+            </Fab>
+            <Fab 
+              aria-label="skip" 
+              onClick={skipQueue}
+              size="small"
+            >
+              <SkipNextIcon fontSize="small" />
+            </Fab>
+          </Box>
+
+          <LinearProgressWithLabel 
+            value={progress} 
+            currentTime={currentSong.currentTime} 
+            duration={currentSong.duration} 
+          />
+        </Box>
       </Box>
-
+      
+      <TableContainer component={Paper} sx={{id: 'right-panel',  width: '70%', margin: 'auto', marginTop: '20px', borderRadius: 5, p:3, fontFamily: 'Roboto', height: '85vh', overflowY: 'scroll'}}>
+      <h2>Queue</h2>
       <Table sx={{ minWidth: 650, width: '100%' }} aria-label="simple table">
         <TableHead>
           <TableRow>
@@ -288,6 +392,7 @@ const MusicPlayer = () => {
             <TableCell>AudioURL</TableCell>
             <TableCell>Duration</TableCell>
             <TableCell>Status</TableCell>
+            <TableCell>Control</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -296,34 +401,53 @@ const MusicPlayer = () => {
               <TableCell>{item.id}</TableCell>
               <TableCell>{item.title}</TableCell>
               <TableCell>{item.url}</TableCell>
-              <TableCell>{shortenUrl(item.audioUrl)}</TableCell>
+              <TableCell>
+                {typeof item.audioUrl === 'string' && item.audioUrl.startsWith('https:') ? (
+                  <CheckIcon color="success" />
+                ) : item.audioUrl ? (
+                  item.audioUrl
+                ) : isNaN ? (
+                  <CloseIcon color="warning"></CloseIcon>
+                ): (
+                  <Typography color="error">Error</Typography>
+                )}
+              </TableCell>
               <TableCell>{formatDuration(item.duration)}</TableCell>
-              <TableCell>{item.status}</TableCell>
+              <TableCell>
+                {item.status === 'processing' ? (
+                  <CircularProgress size={24} />
+                ) : item.status === 'processed' ? (
+                  <CheckIcon color="success" />
+                ) : item.status === 'finished' ? (
+                  <DoneAllIcon color="success" />
+                ) : item.status === 'playing' ? (
+                  <PlayCircleIcon color="primary" />
+                ) : (
+                  item.status
+                )}
+              </TableCell>
+              <TableCell>
+              <IconButton aria-label="delete" size="small" onClick={() => handleDelete(item.id)}>
+                <DeleteIcon />
+              </IconButton>
+              <IconButton color="success" size="small" onClick={() => handlePlay(item.id)}>
+                <PlayArrowIcon />
+              </IconButton>
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
-      <Box sx={{ display: 'flex', gap: 1, marginTop: 2, marginBottom: 2}}>
-        <TextField
-          variant='outlined'
-          size='small'
-          type="text"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="Enter YouTube URL"
-        />
-        <Button variant='contained' color='primary' onClick={addToQueue} startIcon={<SendIcon />}>Add to Queue</Button>
-        <Button variant='contained' color='primary' onClick={skipQueue} startIcon={<SkipNextIcon />}>Skip</Button>
-        <Button variant='contained' color='primary' onClick={clearQueue} startIcon={<DeleteIcon />}>Clear Queue</Button>
-        <Button variant='contained' color='primary' onClick={pasteTest} startIcon={<InsertLinkIcon />}>Paste test link</Button>
-      </Box>
+      
       
 
       <audio controls ref={audioRef}>
          <source src={audioSrc} type="audio/mpeg"/>
           Your browser does not support the audio element.
        </audio>
-    </TableContainer>
+      </TableContainer>
+    </Box>
+    
     // <div style={{width: 1000, margin: "0 auto"}}>
     //   <h2>Queue Manager</h2>
     //   <input

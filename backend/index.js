@@ -92,7 +92,7 @@ const broadcastMessage = (message) => {
   activeConnections.forEach(client => {
       if (client.readyState === WebSocket.OPEN) {
           client.send(JSON.stringify(message));
-          console.log(`Sent msg:\t${JSON.stringify(message)}`)
+          console.log(`Sent msg:\t${JSON.stringify(message).slice(0,70)}`)
       }
   });
 };
@@ -104,30 +104,24 @@ const sendFetchNotification = () =>{
 // --------------------------
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------PLAY
 const play = async () => {
-  let currPlaying = await currentlyPlaying();
-  if (currPlaying == null){
-    console.log(`[play] currently playing: ${currPlaying}`);
-    await processNextFromQueue();
-  }else{
-    _currentAudio.state = "play";
-    console.log(`[play] currently playing: ${currPlaying}`);
-    _currentAudio.duration = JSON.parse(currPlaying).duration;
-    broadcastMessage({ event: 'play', message: currPlaying });
-    _currentAudio.startIndexIncrement();
+  if (_currentAudio.state == "pause"){
+    let currPlaying = await currentlyPlaying();
+    if (currPlaying == null){
+      console.log(`[play] currently playing (null): ${currPlaying}`);
+      await processNextFromQueue();
+    }else{
+      _currentAudio.state = "play";
+      _currentAudio.duration = JSON.parse(currPlaying).duration;
+      broadcastMessage({ event: 'play', message: currPlaying });
+      _currentAudio.startIndexIncrement();
+    }
   }
 }
 
 const next = async () => {
   _currentAudio.state = "pause";
   await stopPlaying();
-  let currPlaying = await currentlyPlaying();
-  if(currPlaying != null){
-    _currentAudio.state = "play";
-    broadcastMessage({ event: 'play', message: JSON.parse(currPlaying).audioUrl });
-    _currentAudio.startIndexIncrement();
-  }else{
-    broadcastMessage({ event: 'queue-end', message: "Queue has ended." });
-  };
+  play();
 }
 
 const getDuration = async (url) => {
@@ -260,6 +254,16 @@ app.post('/queue/clear', (req, res) => {
   });
 });
 
+// Remove track from the queue
+app.post('/queue/remove', (req, res) => {
+  const IdToRemove = req.body.id;
+  console.log(IdToRemove);
+  db.run(`DELETE FROM queue WHERE id=?`, [IdToRemove], (err) => {
+    if (err) return res.status(500).json({ error: 'Failed to remove from the queue' });
+    res.json({ message: 'Track removed from the queue' });
+  });
+});
+
 
 // Get next song from the queue, process streaming url and save it to db
 const processNextFromQueue = async () => {
@@ -295,7 +299,10 @@ const processNextFromQueue = async () => {
           duration = await getDuration(audioUrl);
           db.run(`UPDATE queue SET status = 'processed', audioUrl = ?, title = ?, duration = ? WHERE id = ?`, [audioUrl, title, duration, item.id,]);
           sendFetchNotification();
+
+          console.log(`audio state: \t\t\t\t\t\t\t\t\t\t\t\t\t${_currentAudio.state}`);
           play();
+
         } catch (error) {
           console.error(`[processNextFromQueue] Error: `, error.message);
         }
@@ -390,6 +397,7 @@ const stopPlaying = async () => {
       items.forEach((item) => {
         db.run(`UPDATE queue SET status = 'finished' WHERE id = ?`, [item.id]);
         console.log(`[stopPlaying] Skipped item with id=${item.id}`);
+        // broadcastMessage({ event: 'track-ended', message: 0 });
         sendFetchNotification();
         resolve(true);
       });
