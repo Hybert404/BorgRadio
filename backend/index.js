@@ -62,7 +62,7 @@ app.use(express.json());
 
 const PORT        = process.env.PORT || 5000
 
-
+let loopQueue = false;
 
 // ---------WEBSOCKET---------
 const activeConnections = new Set();
@@ -71,14 +71,21 @@ wss.on('connection', async (ws) => {
   console.log('Client connected');
   activeConnections.add(ws);
   let iqe = await isQueueEmpty();
-  console.log(`state: ${_currentAudio.state}, connections: ${activeConnections.size}, queue empty?: ${iqe}`);
+  // console.log(`state: ${_currentAudio.state}, connections: ${activeConnections.size}, queue empty?: ${iqe}`);
+  broadcastMessage({ event: 'loopQueue', message: loopQueue });
   if (activeConnections.size > 0 && iqe == false){
     play();
   }
 
   ws.on('message', (message) => {
     console.log('Received:', message);
-    ws.send(`Echo: ${message}`);
+    // ws.send({message});
+    const messageString = Buffer.from(message).toString();  // Decode buffer to string
+    const data = JSON.parse(messageString);  // Parse the JSON message
+    if(data.type == "loopQueue"){
+      loopQueue = data.message;
+      console.log(data);
+    }
   });
 
   ws.on('close', () => {

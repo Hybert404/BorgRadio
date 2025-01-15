@@ -23,6 +23,8 @@ import PauseIcon from '@mui/icons-material/Pause';
 import Fab from '@mui/material/Fab';
 import IconButton from '@mui/material/IconButton';
 import CloseIcon from '@mui/icons-material/Close';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Checkbox from '@mui/material/Checkbox';
 import '@fontsource/roboto';
 <link
   rel="stylesheet"
@@ -60,6 +62,8 @@ const MusicPlayer = () => {
   const [audioSrc, setAudioSrc] = useState(''); // State to manage the audio source
   const audioRef = useRef(null); // Reference to the audio player
   const [isUserInteracted, setIsUserInteracted] = useState(false); // Track user interaction
+  const [loopQueue, setLoopQueue] = useState(false); // State to control checkbox
+  const [initialStatusReceived, setInitialStatusReceived] = useState(false);  // Prevent sending until status received
   const [currentSong, setCurrentSong] = useState({
     id: null,
     url: null,
@@ -68,7 +72,8 @@ const MusicPlayer = () => {
     duration: 0,  // in seconds
     currentTime: 0,
   });
-  const [isPlaying, setIsPlaying] = useState(false);
+  const [isPlaying, setIsPlaying] = React.useState(null);
+  const ws = useRef(null);
 
   const pastelink = () => {
     const links = [
@@ -154,52 +159,55 @@ const MusicPlayer = () => {
 
   useEffect(() => {
     fetchQueue();  // Fetch queue when the component loads
-
-    //websocket
-    const ws = new WebSocket('ws://localhost:5000');
-
-    ws.onopen = () => {
+  
+    // WebSocket setup
+    ws.current = new WebSocket('ws://localhost:5000');
+  
+    ws.current.onopen = () => {
       console.log('Connected to server');
-      // ws.send('Hello from client');
     };
-
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      const now = new Date();
-      const time = `${now.getHours()}:${now.getMinutes()}:${now.getSeconds()}.${now.getMilliseconds()}`;
-      console.log(`[WS] Event: ${data.event}, Message: ${data.message}`);
+  
+    ws.current.onmessage = (event) => {
+      let data;
+      try {
+        data = JSON.parse(event.data);  // Parse incoming message
+        console.log(`[WS] Event: ${data.event}, Message: ${data.message}`);
+      } catch (e) {
+        console.error('Failed to parse event data:', event.data);
+        return;  // Exit if data is invalid
+      }
+  
       let msg;
       try {
-        msg = JSON.parse(data.message);
+        msg = typeof data.message === 'string' ? JSON.parse(data.message) : data.message;
       } catch (e) {
-        msg = null; // Handle or ignore invalid JSON
+        console.error('Invalid JSON in message:', data.message);
+        msg = null;
       }
-
+  
       switch (data.event) {
         case 'track-ended':
           console.log('The track has ended. Ready for the next track.');
           break;
-        
+  
         case 'track-skipped':
           console.log('The track was skipped.');
           if (audioRef.current) {
             audioRef.current.pause();
           }
           break;
-        
+  
         case 'refresh':
           fetchQueue();
           break;
-        
+  
         case 'play':
           if (audioRef.current) {
-            // Stop current playback and clear interval if applicable
             audioRef.current.pause();
             if (audioRef.current.intervalId) {
               clearInterval(audioRef.current.intervalId);
             }
-        
-            // Set new source and reload
+  
             setAudioSrc(msg.audioUrl);
             setCurrentSong({
               id: msg.id,
@@ -209,39 +217,45 @@ const MusicPlayer = () => {
               duration: msg.duration,
               currentTime: 0,
             });
-        
-            // Use event to safely start playback after loading
+  
             const handleLoadedData = () => {
               audioRef.current.play().catch((err) => {
                 console.error("Error playing audio:", err);
               });
             };
-        
+  
             audioRef.current.addEventListener('loadeddata', handleLoadedData);
-        
-            // Clean up to prevent memory leaks
+  
             audioRef.current.onended = () => {
               clearInterval(audioRef.current.intervalId);
               audioRef.current.removeEventListener('loadeddata', handleLoadedData);
             };
-        
-            audioRef.current.load(); // Trigger loading of the new source
+  
+            audioRef.current.load();
           }
           break;
-          
+  
+        case 'loopQueue':
+          setLoopQueue(msg);
+          setInitialStatusReceived(true);
+          break;
+  
         default:
           console.log('Unhandled event type:', data.event);
           break;
       }
       setResponse(event.data);
     };
-
-    // Cleanup on component unmount
+  
+    // Cleanup
     return () => {
-      ws.close();
-      console.log('Disconnected from server');
+      if (ws.current) {
+        ws.current.close();
+        console.log('Disconnected from server');
+      }
     };
   }, []);
+  
 
   useEffect(() => {
     audioRef.current.load();
@@ -314,6 +328,14 @@ const MusicPlayer = () => {
     }
   };
 
+  const loopQueueChange = (event) => {
+    if (initialStatusReceived && ws.current && ws.current.readyState === WebSocket.OPEN) {
+      const checked = event.target.checked;
+      setLoopQueue(checked);  // Update state optimistically
+      ws.current.send(JSON.stringify({ type: 'loopQueue', message: checked }));
+    }
+  };
+
   return (
     <Box sx={{ display: 'flex', gap: 2, alignItems: 'left' }}>
       <Box sx={{ id: 'left-panel', display: 'inline', width: '30%', marginTop: '20px', p:4}}>
@@ -334,6 +356,7 @@ const MusicPlayer = () => {
           <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', marginTop: 2}}>
             <Button variant='contained' color='error' onClick={clearQueue} startIcon={<DeleteIcon />}>Clear Queue</Button>
             <Button variant='contained' color='primary' onClick={pasteTest} startIcon={<InsertLinkIcon />}>Paste test link</Button>
+            <FormControlLabel control={<Checkbox checked={loopQueue} onChange={loopQueueChange}/>} label="Loop queue" />
           </Box>
           {/* <Button variant='contained' color='primary' onClick={skipQueue} startIcon={<SkipNextIcon />}>Skip</Button> */}
           
