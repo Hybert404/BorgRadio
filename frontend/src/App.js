@@ -64,6 +64,7 @@ const MusicPlayer = () => {
   const [isUserInteracted, setIsUserInteracted] = useState(false); // Track user interaction
   const [loopQueue, setLoopQueue] = useState(false); // State to control checkbox
   const [initialStatusReceived, setInitialStatusReceived] = useState(false);  // Prevent sending until status received
+  const [randomizeQueue, setRandomizeQueue] = useState(false); // State to control checkbox
   const [currentSong, setCurrentSong] = useState({
     id: null,
     url: null,
@@ -72,7 +73,7 @@ const MusicPlayer = () => {
     duration: 0,  // in seconds
     currentTime: 0,
   });
-  const [isPlaying, setIsPlaying] = React.useState(null);
+  const [isPlaying, setIsPlaying] = React.useState(false);
   const ws = useRef(null);
 
   const pastelink = () => {
@@ -235,8 +236,10 @@ const MusicPlayer = () => {
           }
           break;
   
-        case 'loopQueue':
-          setLoopQueue(msg);
+        case 'params':
+          setLoopQueue(msg.loopQueue);
+          setRandomizeQueue(msg.randomizeQueue)
+          setIsPlaying(msg.status)
           setInitialStatusReceived(true);
           break;
   
@@ -307,9 +310,38 @@ const MusicPlayer = () => {
   ? (currentSong.currentTime / currentSong.duration) * 100 
   : 100;
 
-  const handleTogglePlayPause = () => {
+  const handleTogglePlayPause = async () => {
     setIsPlaying(!isPlaying);
   };
+
+  useEffect(() => {
+    if (initialStatusReceived) {  //wchodzi w ta petle bo initialstatusreceived jest true za wczesnie
+      if(isPlaying == true){
+        try {
+          async function resume(){
+            await axios.post('http://localhost:5000/queue/resume');
+          }
+          resume(); //obejście problemu asynca
+          
+          fetchQueue();  // Refresh queue after clearing
+        } catch (error) {
+          console.error('Error resuming track:', error);
+        }
+      }else{
+        console.log(isPlaying);
+        try {
+          async function pause(){
+            await axios.post('http://localhost:5000/queue/pause');
+          }
+          pause(); //obejście problemu asynca
+
+          fetchQueue();  // Refresh queue after clearing
+        } catch (error) {
+          console.error('Error pausing track:', error);
+        }
+      }
+    };
+  }, [isPlaying]);
 
   const handleDelete = async (id) => {
     setQueue((prevQueue) => prevQueue.filter(item => item.id !== id));
@@ -324,17 +356,36 @@ const MusicPlayer = () => {
   const handlePlay = (id) => {
     const songToPlay = queue.find(item => item.id === id);
     if (songToPlay) {
-      
+      // TODO
     }
   };
 
   const loopQueueChange = (event) => {
-    if (initialStatusReceived && ws.current && ws.current.readyState === WebSocket.OPEN) {
+    if (initialStatusReceived) {
       const checked = event.target.checked;
       setLoopQueue(checked);  // Update state optimistically
-      ws.current.send(JSON.stringify({ type: 'loopQueue', message: checked }));
     }
   };
+
+  const randomizeQueueChange = (event) => {
+    if (initialStatusReceived) {
+      const checked = event.target.checked;
+      setRandomizeQueue(checked);  // Update state optimistically
+    }
+  };
+
+  useEffect(() => {
+    if (initialStatusReceived && ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({
+        type: 'params',
+        message: {
+          'loopQueue': loopQueue,
+          'randomizeQueue': randomizeQueue
+        }
+      }));
+    }
+  }, [loopQueue, randomizeQueue]);
+  
 
   return (
     <Box sx={{ display: 'flex', gap: 2, alignItems: 'left' }}>
@@ -357,6 +408,7 @@ const MusicPlayer = () => {
             <Button variant='contained' color='error' onClick={clearQueue} startIcon={<DeleteIcon />}>Clear Queue</Button>
             <Button variant='contained' color='primary' onClick={pasteTest} startIcon={<InsertLinkIcon />}>Paste test link</Button>
             <FormControlLabel control={<Checkbox checked={loopQueue} onChange={loopQueueChange}/>} label="Loop queue" />
+            <FormControlLabel control={<Checkbox checked={randomizeQueue} onChange={randomizeQueueChange}/>} label="Randomize queue" />
           </Box>
           {/* <Button variant='contained' color='primary' onClick={skipQueue} startIcon={<SkipNextIcon />}>Skip</Button> */}
           

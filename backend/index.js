@@ -34,7 +34,7 @@ class currentAudio {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
-      console.log("Index increment stopped.");
+      console.log("Index increment paused.");
     }
   }
 
@@ -63,6 +63,7 @@ app.use(express.json());
 const PORT        = process.env.PORT || 5000
 
 let loopQueue = false;
+let randomizeQueue = false;
 
 // ---------WEBSOCKET---------
 const activeConnections = new Set();
@@ -72,7 +73,11 @@ wss.on('connection', async (ws) => {
   activeConnections.add(ws);
   let iqe = await isQueueEmpty();
   // console.log(`state: ${_currentAudio.state}, connections: ${activeConnections.size}, queue empty?: ${iqe}`);
-  broadcastMessage({ event: 'loopQueue', message: loopQueue });
+  broadcastMessage({ event: 'params', message: {
+    'loopQueue': loopQueue,
+    'randomizeQueue': randomizeQueue,
+    'status': _currentAudio.state
+  } });
   if (activeConnections.size > 0 && iqe == false){
     play();
   }
@@ -82,10 +87,21 @@ wss.on('connection', async (ws) => {
     // ws.send({message});
     const messageString = Buffer.from(message).toString();  // Decode buffer to string
     const data = JSON.parse(messageString);  // Parse the JSON message
-    if(data.type == "loopQueue"){
-      loopQueue = data.message;
-      console.log(data);
+    switch(data.type){
+
+      case "params":
+        loopQueue = data.message.loopQueue;
+        randomizeQueue = data.message.randomizeQueue;
+        console.log(data.message.status);
+        console.log(data);
+        break;
+
+      default:
+        console.log('Unhandled data type:', data.type);
+        break;
     }
+      
+    
   });
 
   ws.on('close', () => {
@@ -111,13 +127,13 @@ const sendFetchNotification = () =>{
 // --------------------------
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------PLAY
 const play = async () => {
-  if (_currentAudio.state == "pause"){
+  if (_currentAudio.state == "paused"){
     let currPlaying = await currentlyPlaying();
     if (currPlaying == null){
       console.log(`[play] currently playing (null): ${currPlaying}`);
       await processNextFromQueue();
     }else{
-      _currentAudio.state = "play";
+      _currentAudio.state = "playing";
       _currentAudio.duration = JSON.parse(currPlaying).duration;
       broadcastMessage({ event: 'play', message: currPlaying });
       _currentAudio.startIndexIncrement();
@@ -126,7 +142,7 @@ const play = async () => {
 }
 
 const next = async () => {
-  _currentAudio.state = "pause";
+  _currentAudio.state = "paused";
   await stopPlaying();
   play();
 }
@@ -216,7 +232,7 @@ app.get('/queue', (req, res) => {
 // Add URL to Queue and process title
 app.post('/queue/add', (req, res) => {
   const { url } = req.body;
-  if (!url) {
+  if (!url || url.startsWith('https://youtu') == false) {
     return res.status(400).json({ error: 'YouTube URL is required' });
   }
 
@@ -240,7 +256,7 @@ const skipTrack = async (res) => {
     //     audioStream = null;
     // }
     _currentAudio.resetIndexIncrement();
-    _currentAudio.state = "pause";
+    _currentAudio.state = "paused";
     broadcastMessage({ event: 'track-skipped', message: 'Track skipped.' });
     next();
     // streamAudio(res); // Start the next track
@@ -264,10 +280,33 @@ app.post('/queue/clear', (req, res) => {
 // Remove track from the queue
 app.post('/queue/remove', (req, res) => {
   const IdToRemove = req.body.id;
-  console.log(IdToRemove);
   db.run(`DELETE FROM queue WHERE id=?`, [IdToRemove], (err) => {
     if (err) return res.status(500).json({ error: 'Failed to remove from the queue' });
     res.json({ message: 'Track removed from the queue' });
+  });
+});
+
+// Pause track
+app.post('/queue/pause', (req, res) => {
+  db.run(`UPDATE queue SET status = 'paused' WHERE status = 'playing'`, (err) => {
+    if (err) return res.status(500).json({ error: 'Failed to pause the track' });
+    _currentAudio.state = 'paused';
+    _currentAudio.stopIndexIncrement();
+    console.log(`pause: ${_currentAudio.state}`);
+    sendFetchNotification();
+    res.json({ message: 'Track paused' });
+  });
+});
+
+// Resume track
+app.post('/queue/resume', (req, res) => {
+  db.run(`UPDATE queue SET status = 'playing' WHERE status = 'paused'`, (err) => {
+    if (err) return res.status(500).json({ error: 'Failed to resume the track' });
+    _currentAudio.state = 'playing';
+    _currentAudio.startIndexIncrement();
+    console.log(`resume: ${_currentAudio.state}`);
+    sendFetchNotification();
+    res.json({ message: 'Track resumed' });
   });
 });
 
@@ -279,13 +318,37 @@ const processNextFromQueue = async () => {
     db.get(`SELECT * FROM queue WHERE status = 'pending' ORDER BY id LIMIT 1`, (err, item) => {
       if (err) {
         console.error('[processNextFromQueue] Error accessing queue:', err);
-        console.log('[processNextFromQueue] Retrying...');
         reject(err); // Reject the promise with the error
         return;
       }
       if (!item) {
         console.log('[processNextFromQueue] No more links to process.');
-        // setTimeout(processQueue, 5000); // Check again after 5 seconds
+        // End of the queue - Loop queue if it's enabled
+        if (loopQueue){
+          db.get(`SELECT * FROM queue WHERE status = 'finished' ORDER BY id LIMIT 1`, (err, item) => {
+            if (err) {
+              console.error('[processNextFromQueue] Error accessing queue:', err);
+              reject(err); // Reject the promise with the error
+              return;
+            }
+            if (!item){
+              console.log('[processNextFromQueue] No more finished links.');
+              resolve(null);
+              return;
+            }
+            db.run(`UPDATE queue SET status = 'pending' WHERE status = 'finished'`, (err) => {
+              if (err) {
+                console.error('[processNextFromQueue] Error updating status:', err);
+              } else {
+                console.log('[processNextFromQueue] Status updated to pending for all finished songs.');
+              }
+            });
+            processNextFromQueue();
+            resolve(null);
+            return;
+          });
+        }
+
         resolve(null);
         return;
       }
@@ -294,11 +357,6 @@ const processNextFromQueue = async () => {
       db.run(`UPDATE queue SET status = 'processing' WHERE id = ?`, [item.id]);
       sendFetchNotification();
 
-      // Run yt-dlp to get the audio URL
-      // getAudioStreamURL(item.url).then(({ title, audioUrl })=> {
-      //   db.run(`UPDATE queue SET status = 'processed', audioUrl = ? WHERE id = ?`, [audioUrl, item.id]);
-      //   sendFetchNotification();
-      // });
       (async () => {
         try {
           const { title, audioUrl } = await getAudioUrlAndTitle(item.url);
@@ -307,7 +365,6 @@ const processNextFromQueue = async () => {
           db.run(`UPDATE queue SET status = 'processed', audioUrl = ?, title = ?, duration = ? WHERE id = ?`, [audioUrl, title, duration, item.id,]);
           sendFetchNotification();
 
-          console.log(`audio state: \t\t\t\t\t\t\t\t\t\t\t\t\t${_currentAudio.state}`);
           play();
 
         } catch (error) {
@@ -466,6 +523,15 @@ function formatError(err) {
 
   return message; // If no URL found, return the original message
 }
+
+// function setCurrentAudioStatus(newStatus){
+//   if (newStatus != _currentAudio.state){
+//     _currentAudio.state = newStatus;
+//     if(_currentAudio.state == 'playing'){
+//       play();
+//     }
+//   }
+// }
 
 
 
