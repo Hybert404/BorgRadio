@@ -6,10 +6,27 @@ const ffmpeg       = require('fluent-ffmpeg');
 const ffmpegPath   = require('@ffmpeg-installer/ffmpeg').path;
 const WebSocket    = require('ws');
 
+let serverStatuses = {
+  loopQueue: true,
+  randomizeQueue: false,
+  playState: false,
+};
+
+const sqlite3      = require('sqlite3').verbose();
+const app          = express()
+const server       = http.createServer(app);
+const wss          = new WebSocket.Server({ server });
+
+const db           = new sqlite3.Database('./queue.db');
+const PORT        = process.env.PORT || 5000
+
+ffmpeg.setFfmpegPath(ffmpegPath);
+app.use(cors());
+app.use(express.json());
+
 class currentAudio {
   constructor({url, state = "pause", index = 0, duration = null}){
     this.url = url;
-    this.state = state;
     this.index = index;
     this.duration = duration;
     this.timer = null; // To store the interval ID
@@ -49,51 +66,48 @@ class currentAudio {
 }
 var _currentAudio = new currentAudio({url: null})
 
-const sqlite3      = require('sqlite3').verbose();
-const app          = express()
-const server       = http.createServer(app);
-const wss          = new WebSocket.Server({ server });
-
-const db           = new sqlite3.Database('./queue.db');
-
-ffmpeg.setFfmpegPath(ffmpegPath);
-app.use(cors());
-app.use(express.json());
-
-const PORT        = process.env.PORT || 5000
-
-let loopQueue = false;
-let randomizeQueue = false;
-
-// ---------WEBSOCKET---------
+// ------------------------------------------------------WEBSOCKET---------------------------------------------------------------
 const activeConnections = new Set();
 
-wss.on('connection', async (ws) => {
+wss.on('connection', (ws) => {
   console.log('Client connected');
   activeConnections.add(ws);
-  let iqe = await isQueueEmpty();
+  // let iqe = await isQueueEmpty();
   // console.log(`state: ${_currentAudio.state}, connections: ${activeConnections.size}, queue empty?: ${iqe}`);
-  broadcastMessage({ event: 'params', message: {
-    'loopQueue': loopQueue,
-    'randomizeQueue': randomizeQueue,
-    'status': _currentAudio.state
-  } });
-  if (activeConnections.size > 0 && iqe == false){
+  // broadcastMessage({ event: 'params', message: {
+  //   'loopQueue': loopQueue,
+  //   'randomizeQueue': randomizeQueue,
+  //   'status': _currentAudio.state
+  // } });
+
+  wss.emit('statusUpdate', serverStatuses); // Send all statuses to the client
+
+  wss.on('statusUpdate', (updates) => {
+    Object.assign(serverStatuses, updates);  // Merge updates into server state
+    broadcastMessage({ event: 'statusUpdate', message: serverStatuses });
+  });
+
+  if (activeConnections.size > 0){
     play();
   }
 
   ws.on('message', (message) => {
-    console.log('Received:', message);
     // ws.send({message});
     const messageString = Buffer.from(message).toString();  // Decode buffer to string
+    console.log('Received:', {message, messageString});    
     const data = JSON.parse(messageString);  // Parse the JSON message
     switch(data.type){
 
-      case "params":
+      case 'params':
         loopQueue = data.message.loopQueue;
         randomizeQueue = data.message.randomizeQueue;
         console.log(data.message.status);
         console.log(data);
+        break;
+
+      case 'statusUpdate':
+        Object.assign(serverStatuses, data.status); // Update statuses
+        broadcastMessage({ event: 'statusUpdate', message: serverStatuses });
         break;
 
       default:
@@ -122,7 +136,7 @@ const broadcastMessage = (message) => {
 
 // Notify all active WebSocket clients to fetch queue
 const sendFetchNotification = () =>{
-  broadcastMessage({ event: 'refresh', message: 'Refreshing queue.' });
+  broadcastMessage({ event: 'refresh', message: JSON.stringify('Refreshing queue.') });
 }
 // --------------------------
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------PLAY
@@ -232,7 +246,7 @@ app.get('/queue', (req, res) => {
 // Add URL to Queue and process title
 app.post('/queue/add', (req, res) => {
   const { url } = req.body;
-  if (!url || url.startsWith('https://youtu') == false) {
+  if (!url || url.startsWith('https://') == false) {
     return res.status(400).json({ error: 'YouTube URL is required' });
   }
 
@@ -273,6 +287,7 @@ app.post('/queue/skip', async (req, res) => {
 app.post('/queue/clear', (req, res) => {
   db.run(`DELETE FROM queue`, (err) => {
     if (err) return res.status(500).json({ error: 'Failed to clear the queue' });
+    sendFetchNotification();
     res.json({ message: 'Queue cleared' });
   });
 });
@@ -282,6 +297,7 @@ app.post('/queue/remove', (req, res) => {
   const IdToRemove = req.body.id;
   db.run(`DELETE FROM queue WHERE id=?`, [IdToRemove], (err) => {
     if (err) return res.status(500).json({ error: 'Failed to remove from the queue' });
+    sendFetchNotification();
     res.json({ message: 'Track removed from the queue' });
   });
 });

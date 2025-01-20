@@ -54,7 +54,7 @@ const LinearProgressWithLabel = ({ currentTime, duration }) => {
 };
 
 
-const MusicPlayer = () => {
+const App = () => {
   const [url, setUrl] = useState('');
   const [queue, setQueue] = useState([]);
   const [response, setResponse] = useState('');
@@ -62,9 +62,8 @@ const MusicPlayer = () => {
   const [audioSrc, setAudioSrc] = useState(''); // State to manage the audio source
   const audioRef = useRef(null); // Reference to the audio player
   const [isUserInteracted, setIsUserInteracted] = useState(false); // Track user interaction
-  const [loopQueue, setLoopQueue] = useState(false); // State to control checkbox
   const [initialStatusReceived, setInitialStatusReceived] = useState(false);  // Prevent sending until status received
-  const [randomizeQueue, setRandomizeQueue] = useState(false); // State to control checkbox
+  const [statuses, setStatuses] = useState({});  // All statuses in one object
   const [currentSong, setCurrentSong] = useState({
     id: null,
     url: null,
@@ -73,7 +72,6 @@ const MusicPlayer = () => {
     duration: 0,  // in seconds
     currentTime: 0,
   });
-  const [isPlaying, setIsPlaying] = React.useState(false);
   const ws = useRef(null);
 
   const pastelink = () => {
@@ -109,7 +107,7 @@ const MusicPlayer = () => {
       const response = await axios.get('http://localhost:5000/queue');
       setQueue(response.data);
     } catch (error) {
-      console.error('Error fetching queue:', error);
+      console.error('Error fetching queue:', error.response?.data || error.message);
     }
   };
 
@@ -120,7 +118,7 @@ const MusicPlayer = () => {
       setUrl('');
       fetchQueue();  // Refresh queue after adding
     } catch (error) {
-      console.error('Error adding to queue:', error);
+      console.error('Error adding to queue:', error.response?.data || error.message);
     }
   };
 
@@ -130,7 +128,7 @@ const MusicPlayer = () => {
       await axios.post('http://localhost:5000/queue/clear');
       fetchQueue();  // Refresh queue after clearing
     } catch (error) {
-      console.error('Error clearing queue:', error);
+      console.error('Error clearing queue:', error.response?.data || error.message);
     }
   };
 
@@ -140,7 +138,7 @@ const MusicPlayer = () => {
       await axios.post('http://localhost:5000/queue/skip');
       fetchQueue();  // Refresh queue after skipping
     } catch (error) {
-      console.error('Error skipping queue:', error);
+      console.error('Error skipping queue:', error.response?.data || error.message);
     }
   };
 
@@ -235,13 +233,16 @@ const MusicPlayer = () => {
             audioRef.current.load();
           }
           break;
-  
-        case 'params':
-          setLoopQueue(msg.loopQueue);
-          setRandomizeQueue(msg.randomizeQueue)
-          setIsPlaying(msg.status)
-          setInitialStatusReceived(true);
-          break;
+
+          case 'statusUpdate':
+            setStatuses(data.message); // Update all statuses
+            break;
+        // case 'params':
+        //   setLoopQueue(msg.loopQueue);
+        //   setRandomizeQueue(msg.randomizeQueue)
+        //   setIsPlaying(msg.status)
+        //   setInitialStatusReceived(true);
+        //   break;
   
         default:
           console.log('Unhandled event type:', data.event);
@@ -310,38 +311,38 @@ const MusicPlayer = () => {
   ? (currentSong.currentTime / currentSong.duration) * 100 
   : 100;
 
-  const handleTogglePlayPause = async () => {
-    setIsPlaying(!isPlaying);
-  };
+  // const handleTogglePlayPause = async () => {
+  //   setIsPlaying(!isPlaying);
+  // };
 
-  useEffect(() => {
-    if (initialStatusReceived) {  //wchodzi w ta petle bo initialstatusreceived jest true za wczesnie
-      if(isPlaying == true){
-        try {
-          async function resume(){
-            await axios.post('http://localhost:5000/queue/resume');
-          }
-          resume(); //obejście problemu asynca
+  // useEffect(() => {
+  //   if (initialStatusReceived) {  //wchodzi w ta petle bo initialstatusreceived jest true za wczesnie
+  //     if(isPlaying == true){
+  //       try {
+  //         async function resume(){
+  //           await axios.post('http://localhost:5000/queue/resume');
+  //         }
+  //         resume(); //obejście problemu asynca
           
-          fetchQueue();  // Refresh queue after clearing
-        } catch (error) {
-          console.error('Error resuming track:', error);
-        }
-      }else{
-        console.log(isPlaying);
-        try {
-          async function pause(){
-            await axios.post('http://localhost:5000/queue/pause');
-          }
-          pause(); //obejście problemu asynca
+  //         fetchQueue();  // Refresh queue after clearing
+  //       } catch (error) {
+  //         console.error('Error resuming track:', error);
+  //       }
+  //     }else{
+  //       console.log(isPlaying);
+  //       try {
+  //         async function pause(){
+  //           await axios.post('http://localhost:5000/queue/pause');
+  //         }
+  //         pause(); //obejście problemu asynca
 
-          fetchQueue();  // Refresh queue after clearing
-        } catch (error) {
-          console.error('Error pausing track:', error);
-        }
-      }
-    };
-  }, [isPlaying]);
+  //         fetchQueue();  // Refresh queue after clearing
+  //       } catch (error) {
+  //         console.error('Error pausing track:', error);
+  //       }
+  //     }
+  //   };
+  // }, [isPlaying]);
 
   const handleDelete = async (id) => {
     setQueue((prevQueue) => prevQueue.filter(item => item.id !== id));
@@ -360,31 +361,51 @@ const MusicPlayer = () => {
     }
   };
 
-  const loopQueueChange = (event) => {
-    if (initialStatusReceived) {
-      const checked = event.target.checked;
-      setLoopQueue(checked);  // Update state optimistically
+  const handleCheckboxChange = (event) => {
+    const { name, checked } = event.target;
+    const updatedStatus = { [name]: checked };
+    setStatuses((prev) => ({ ...prev, ...updatedStatus })); // Update local state
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ type: 'statusUpdate', status: updatedStatus }));
     }
   };
 
-  const randomizeQueueChange = (event) => {
-    if (initialStatusReceived) {
-      const checked = event.target.checked;
-      setRandomizeQueue(checked);  // Update state optimistically
+  const togglePlayPause = () => {
+    const newPlayState = statuses.playState === 'play' ? 'pause' : 'play';
+    const updatedStatus = { playState: newPlayState };
+    setStatuses((prev) => ({ ...prev, ...updatedStatus })); // Update locally
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ type: 'statusUpdate', status: updatedStatus }));
     }
   };
 
-  useEffect(() => {
-    if (initialStatusReceived && ws.current && ws.current.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({
-        type: 'params',
-        message: {
-          'loopQueue': loopQueue,
-          'randomizeQueue': randomizeQueue
-        }
-      }));
-    }
-  }, [loopQueue, randomizeQueue]);
+  const statusKeys = Object.keys(statuses).filter((key) => key !== 'playState'); // Exclude button from checkbox loop
+
+  // const loopQueueChange = (event) => {
+  //   if (initialStatusReceived) {
+  //     const checked = event.target.checked;
+  //     setLoopQueue(checked);  // Update state optimistically
+  //   }
+  // };
+
+  // const randomizeQueueChange = (event) => {
+  //   if (initialStatusReceived) {
+  //     const checked = event.target.checked;
+  //     setRandomizeQueue(checked);  // Update state optimistically
+  //   }
+  // };
+
+  // useEffect(() => {
+  //   if (initialStatusReceived && ws.current && ws.current.readyState === WebSocket.OPEN) {
+  //     ws.current.send(JSON.stringify({
+  //       type: 'params',
+  //       message: {
+  //         'loopQueue': loopQueue,
+  //         'randomizeQueue': randomizeQueue
+  //       }
+  //     }));
+  //   }
+  // }, [loopQueue, randomizeQueue]);
   
 
   return (
@@ -401,14 +422,15 @@ const MusicPlayer = () => {
               placeholder="Enter YouTube URL"
               sx={{ flex: 1 }}
             />
-            <Button variant='contained' color='primary' onClick={addToQueue} startIcon={<QueueIcon />}>Add to Queue</Button>
+            <Button key='add_to_queue' variant='contained' color='primary' onClick={addToQueue} startIcon={<QueueIcon />}>Add to Queue</Button>
           </Box>
           
           <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', marginTop: 2}}>
             <Button variant='contained' color='error' onClick={clearQueue} startIcon={<DeleteIcon />}>Clear Queue</Button>
             <Button variant='contained' color='primary' onClick={pasteTest} startIcon={<InsertLinkIcon />}>Paste test link</Button>
-            <FormControlLabel control={<Checkbox checked={loopQueue} onChange={loopQueueChange}/>} label="Loop queue" />
-            <FormControlLabel control={<Checkbox checked={randomizeQueue} onChange={randomizeQueueChange}/>} label="Randomize queue" />
+            {statusKeys.map((key) => (
+              <FormControlLabel control={<Checkbox checked={statuses[key]} onChange={handleCheckboxChange} name={key} />} label={key} />
+            ))}
           </Box>
           {/* <Button variant='contained' color='primary' onClick={skipQueue} startIcon={<SkipNextIcon />}>Skip</Button> */}
           
@@ -432,12 +454,12 @@ const MusicPlayer = () => {
             </Fab>
             <Fab 
               color="primary" 
-              aria-label={isPlaying ? 'pause' : 'play'} 
-              onClick={handleTogglePlayPause}
+              aria-label={statuses.playState === 'play' ? 'pause' : 'play'} 
+              onClick={togglePlayPause}
               sx={{ margin: 1 }}
               size="big"
             >
-              {isPlaying ? <PauseIcon /> : <PlayArrowIcon />}
+              {statuses.playState === 'play' ? <PauseIcon /> : <PlayArrowIcon />}
             </Fab>
             <Fab 
               aria-label="skip" 
@@ -567,4 +589,4 @@ const MusicPlayer = () => {
   );
 };
 
-export default MusicPlayer;
+export default App;
