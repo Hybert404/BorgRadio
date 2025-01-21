@@ -25,7 +25,7 @@ app.use(cors());
 app.use(express.json());
 
 class currentAudio {
-  constructor({url, state = "pause", index = 0, duration = null}){
+  constructor({url, index = 0, duration = null}){
     this.url = url;
     this.index = index;
     this.duration = duration;
@@ -33,7 +33,7 @@ class currentAudio {
   }
 
   startIndexIncrement() {
-    if (this.state === "play" && !this.timer) {
+    if (serverStatuses.playState === "play" && !this.timer) {
       this.timer = setInterval(() => {
         this.index += 1;
         console.log(`Index incremented to: ${this.index}`);
@@ -70,7 +70,7 @@ var _currentAudio = new currentAudio({url: null})
 const activeConnections = new Set();
 
 wss.on('connection', (ws) => {
-  console.log('Client connected');
+  console.log('\x1b[32m%s\x1b[0m', 'Client connected');
   activeConnections.add(ws);
   // let iqe = await isQueueEmpty();
   // console.log(`state: ${_currentAudio.state}, connections: ${activeConnections.size}, queue empty?: ${iqe}`);
@@ -119,7 +119,7 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
-    console.log('Client disconnected');
+    console.log('\x1b[35m%s\x1b[0m', 'Client disconnected');
     activeConnections.delete(ws);
   });
 });
@@ -129,7 +129,7 @@ const broadcastMessage = (message) => {
   activeConnections.forEach(client => {
       if (client.readyState === WebSocket.OPEN) {
           client.send(JSON.stringify(message));
-          console.log(`Sent msg:\t${JSON.stringify(message).slice(0,70)}`)
+          console.log('\x1b[34m%s\x1b[0m', `Sent msg: ${JSON.stringify(message).slice(0,1500)}`);
       }
   });
 };
@@ -287,6 +287,8 @@ app.post('/queue/skip', async (req, res) => {
 app.post('/queue/clear', (req, res) => {
   db.run(`DELETE FROM queue`, (err) => {
     if (err) return res.status(500).json({ error: 'Failed to clear the queue' });
+    serverStatuses.playState = "pause";
+    stopPlaying();
     sendFetchNotification();
     res.json({ message: 'Queue cleared' });
   });
@@ -306,9 +308,8 @@ app.post('/queue/remove', (req, res) => {
 app.post('/queue/pause', (req, res) => {
   db.run(`UPDATE queue SET status = 'paused' WHERE status = 'playing'`, (err) => {
     if (err) return res.status(500).json({ error: 'Failed to pause the track' });
-    _currentAudio.state = 'paused';
     _currentAudio.stopIndexIncrement();
-    console.log(`pause: ${_currentAudio.state}`);
+    stopPlaying();
     sendFetchNotification();
     res.json({ message: 'Track paused' });
   });
@@ -318,9 +319,8 @@ app.post('/queue/pause', (req, res) => {
 app.post('/queue/resume', (req, res) => {
   db.run(`UPDATE queue SET status = 'playing' WHERE status = 'paused'`, (err) => {
     if (err) return res.status(500).json({ error: 'Failed to resume the track' });
-    _currentAudio.state = 'playing';
     _currentAudio.startIndexIncrement();
-    console.log(`resume: ${_currentAudio.state}`);
+    play();
     sendFetchNotification();
     res.json({ message: 'Track resumed' });
   });
@@ -340,7 +340,7 @@ const processNextFromQueue = async () => {
       if (!item) {
         console.log('[processNextFromQueue] No more links to process.');
         // End of the queue - Loop queue if it's enabled
-        if (loopQueue){
+        if (serverStatuses.loopQueue === true){
           db.get(`SELECT * FROM queue WHERE status = 'finished' ORDER BY id LIMIT 1`, (err, item) => {
             if (err) {
               console.error('[processNextFromQueue] Error accessing queue:', err);
@@ -551,4 +551,4 @@ function formatError(err) {
 
 
 
-server.listen(PORT, () => console.log(`Running server on port ${PORT}`))
+server.listen(PORT, () => console.log('\x1b[2m%s\x1b[0m', `Running server on port ${PORT}`))

@@ -7,8 +7,7 @@ import TableContainer from '@mui/material/TableContainer';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Paper from '@mui/material/Paper';
-import { Box, Button, TextField, LinearProgress, Divider, Typography } from '@mui/material';
-import SendIcon from '@mui/icons-material/Send';
+import { Box, Button, TextField, LinearProgress, Typography } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SkipNextIcon from '@mui/icons-material/SkipNext';
 import SkipPreviousIcon from '@mui/icons-material/SkipPrevious';
@@ -57,12 +56,8 @@ const LinearProgressWithLabel = ({ currentTime, duration }) => {
 const App = () => {
   const [url, setUrl] = useState('');
   const [queue, setQueue] = useState([]);
-  const [response, setResponse] = useState('');
-  const [message, setMessage] = useState('');
   const [audioSrc, setAudioSrc] = useState(''); // State to manage the audio source
   const audioRef = useRef(null); // Reference to the audio player
-  const [isUserInteracted, setIsUserInteracted] = useState(false); // Track user interaction
-  const [initialStatusReceived, setInitialStatusReceived] = useState(false);  // Prevent sending until status received
   const [statuses, setStatuses] = useState({});  // All statuses in one object
   const [currentSong, setCurrentSong] = useState({
     id: null,
@@ -139,20 +134,6 @@ const App = () => {
       fetchQueue();  // Refresh queue after skipping
     } catch (error) {
       console.error('Error skipping queue:', error.response?.data || error.message);
-    }
-  };
-
-  const handleUserInteraction = () => {
-    setIsUserInteracted(true);
-    if (audioRef.current) {
-      audioRef.current.play();
-    }
-  };
-
-  const reloadMusic = () => {
-    if (audioRef.current) {
-      audioRef.current.load();
-      audioRef.current.play()
     }
   };
 
@@ -248,7 +229,6 @@ const App = () => {
           console.log('Unhandled event type:', data.event);
           break;
       }
-      setResponse(event.data);
     };
   
     // Cleanup
@@ -315,34 +295,33 @@ const App = () => {
   //   setIsPlaying(!isPlaying);
   // };
 
-  // useEffect(() => {
-  //   if (initialStatusReceived) {  //wchodzi w ta petle bo initialstatusreceived jest true za wczesnie
-  //     if(isPlaying == true){
-  //       try {
-  //         async function resume(){
-  //           await axios.post('http://localhost:5000/queue/resume');
-  //         }
-  //         resume(); //obejście problemu asynca
-          
-  //         fetchQueue();  // Refresh queue after clearing
-  //       } catch (error) {
-  //         console.error('Error resuming track:', error);
-  //       }
-  //     }else{
-  //       console.log(isPlaying);
-  //       try {
-  //         async function pause(){
-  //           await axios.post('http://localhost:5000/queue/pause');
-  //         }
-  //         pause(); //obejście problemu asynca
+  useEffect(() => {
 
-  //         fetchQueue();  // Refresh queue after clearing
-  //       } catch (error) {
-  //         console.error('Error pausing track:', error);
-  //       }
-  //     }
-  //   };
-  // }, [isPlaying]);
+    if(statuses.playState === 'play'){
+      try {
+        async function resume(){
+          await axios.post('http://localhost:5000/queue/resume');
+        }
+        resume(); //obejście problemu asynca
+        
+        fetchQueue();  // Refresh queue after clearing
+      } catch (error) {
+        console.error('Error resuming track:', error);
+      }
+    }else if (statuses.playState === 'pause'){
+      try {
+        async function pause(){
+          await axios.post('http://localhost:5000/queue/pause');
+        }
+        pause(); //obejście problemu asynca
+
+        fetchQueue();  // Refresh queue after clearing
+      } catch (error) {
+        console.error('Error pausing track:', error);
+      }
+    }
+
+  }, [statuses]);
 
   const handleDelete = async (id) => {
     setQueue((prevQueue) => prevQueue.filter(item => item.id !== id));
@@ -517,6 +496,8 @@ const App = () => {
                   <CheckIcon color="success" />
                 ) : item.status === 'finished' ? (
                   <DoneAllIcon color="success" />
+                ) : item.status === 'paused' ? (
+                  <PauseIcon color="primary" />
                 ) : item.status === 'playing' ? (
                   <PlayCircleIcon color="primary" />
                 ) : (
