@@ -25,6 +25,10 @@ import CloseIcon from '@mui/icons-material/Close';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
 import UpdateIcon from '@mui/icons-material/Update';
+import Stack from '@mui/material/Stack';
+import Slider from '@mui/material/Slider';
+import VolumeDown from '@mui/icons-material/VolumeDown';
+import VolumeUp from '@mui/icons-material/VolumeUp';
 import '@fontsource/roboto';
 <link
   rel="stylesheet"
@@ -70,6 +74,7 @@ const App = () => {
   });
   const ws = useRef(null);
   const intervalRef = useRef(null);  // Use ref to store the interval ID
+  const [volume, setVolume] = useState(70); // volume slider
 
   const pastelink = () => {
     const links = [
@@ -362,6 +367,11 @@ const App = () => {
     }
   };
 
+  const handleChange = (event, newValue) => {
+    setVolume(newValue)
+    //TODO
+  };
+
   const statusKeys = Object.keys(statuses).filter((key) => key !== 'playState'); // Exclude button from checkbox loop
 
   return (
@@ -400,31 +410,55 @@ const App = () => {
             {currentSong.title}
           </Typography>
 
-          <Box>
-            <Fab 
-              aria-label="previous" 
-              onClick={null}
-              size="small"
-            >
-              <SkipPreviousIcon fontSize="small" />
-            </Fab>
-            <Fab 
-              color="primary" 
-              aria-label={statuses.playState === 'play' ? 'pause' : 'play'} 
-              onClick={togglePlayPause}
-              sx={{ margin: 1 }}
-              size="big"
-            >
-              {statuses.playState === 'play' ? <PauseIcon /> : <PlayArrowIcon />}
-            </Fab>
-            <Fab 
-              aria-label="skip" 
-              onClick={skipQueue}
-              size="small"
-            >
-              <SkipNextIcon fontSize="small" />
-            </Fab>
-          </Box>
+          <Stack 
+            spacing={2} 
+            direction="row" 
+            sx={{ 
+              alignItems: 'center', 
+              mb: 1, 
+              width: '100%',
+            }}
+          >
+            {/* Left section - Volume */}
+            <Box sx={{ 
+              display: 'flex', 
+              alignItems: 'center',
+              flex: '1 1 33%'
+            }}>
+              <VolumeDown />
+              <Slider aria-label="Volume" value={volume} onChange={handleChange} sx={{width: '100px'}}/>
+              <VolumeUp />
+            </Box>
+
+            {/* Center section - Playback controls */}
+            <Box sx={{ 
+              display: 'flex', 
+              justifyContent: 'center', 
+              alignItems: 'center',
+              flex: '1 1 33%'
+            }}>
+              <Fab aria-label="previous" onClick={null} size="small">
+                <SkipPreviousIcon fontSize="small" />
+              </Fab>
+              <Fab 
+                color="primary" 
+                aria-label={statuses.playState === 'play' ? 'pause' : 'play'} 
+                onClick={togglePlayPause}
+                sx={{ margin: 1 }}
+                size="big"
+              >
+                {statuses.playState === 'play' ? <PauseIcon /> : <PlayArrowIcon />}
+              </Fab>
+              <Fab aria-label="skip" onClick={skipQueue} size="small">
+                <SkipNextIcon fontSize="small" />
+              </Fab>
+            </Box>
+
+            {/* Right section - Empty space */}
+            <Box sx={{ flex: '1 1 33%' }} />
+          </Stack>
+
+          
 
           <LinearProgressWithLabel 
             value={progress} 
