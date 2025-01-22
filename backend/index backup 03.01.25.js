@@ -6,46 +6,17 @@ const ffmpeg       = require('fluent-ffmpeg');
 const ffmpegPath   = require('@ffmpeg-installer/ffmpeg').path;
 const WebSocket    = require('ws');
 
-let serverStatuses = {
-  loopQueue: true,
-  randomizeQueue: false,
-  playState: false,
-};
-
-const sqlite3      = require('sqlite3').verbose();
-const app          = express()
-const server       = http.createServer(app);
-const wss          = new WebSocket.Server({ server });
-
-const db           = new sqlite3.Database('./queue.db');
-const PORT        = process.env.PORT || 5000
-
-ffmpeg.setFfmpegPath(ffmpegPath);
-app.use(cors());
-app.use(express.json());
-
-// Create queue table if it doesn't exist
-db.serialize(() => {
-  db.run(`CREATE TABLE IF NOT EXISTS queue (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    url TEXT NOT NULL,
-    title TEXT,
-    status TEXT DEFAULT 'pending',
-    audioUrl TEXT,
-    duration INTEGER
-  )`);
-});
-
 class currentAudio {
-  constructor({url, index = 0, duration = null}){
+  constructor({url, state = "pause", index = 0, duration = null}){
     this.url = url;
+    this.state = state;
     this.index = index;
     this.duration = duration;
     this.timer = null; // To store the interval ID
   }
 
   startIndexIncrement() {
-    if (serverStatuses.playState === "play" && !this.timer) {
+    if (this.state === "play" && !this.timer) {
       this.timer = setInterval(() => {
         this.index += 1;
         console.log(`Index incremented to: ${this.index}`);
@@ -63,7 +34,7 @@ class currentAudio {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
-      console.log("Index increment paused.");
+      console.log("Index increment stopped.");
     }
   }
 
@@ -78,51 +49,40 @@ class currentAudio {
 }
 var _currentAudio = new currentAudio({url: null})
 
-// ------------------------------------------------------WEBSOCKET---------------------------------------------------------------
+const sqlite3      = require('sqlite3').verbose();
+const app          = express()
+const server       = http.createServer(app);
+const wss          = new WebSocket.Server({ server });
+
+const db           = new sqlite3.Database('./queue.db');
+
+ffmpeg.setFfmpegPath(ffmpegPath);
+app.use(cors());
+app.use(express.json());
+
+const PORT        = process.env.PORT || 5000
+
+
+
+// ---------WEBSOCKET---------
 const activeConnections = new Set();
 
-wss.on('connection', (ws) => {
-  console.log('\x1b[32m%s\x1b[0m', 'Client connected');
+wss.on('connection', async (ws) => {
+  console.log('Client connected');
   activeConnections.add(ws);
-
-  wss.emit('statusUpdate', serverStatuses); // Send all statuses to the client
-
-  wss.on('statusUpdate', (updates) => {
-    Object.assign(serverStatuses, updates);  // Merge updates into server state
-    broadcastMessage({ event: 'statusUpdate', message: serverStatuses });
-  });
-
-  if (activeConnections.size > 0){
+  let iqe = await isQueueEmpty();
+  console.log(`state: ${_currentAudio.state}, connections: ${activeConnections.size}, queue empty?: ${iqe}`);
+  if (activeConnections.size > 0 && iqe == false){
     play();
   }
 
   ws.on('message', (message) => {
-    // ws.send({message});
-    const messageString = Buffer.from(message).toString();  // Decode buffer to string
-    console.log('Received:', {message, messageString});    
-    const data = JSON.parse(messageString);  // Parse the JSON message
-    switch(data.type){
-
-      case 'params':
-        loopQueue = data.message.loopQueue;
-        randomizeQueue = data.message.randomizeQueue;
-        console.log(data.message.status);
-        console.log(data);
-        break;
-
-      case 'statusUpdate':
-        Object.assign(serverStatuses, data.status); // Update statuses
-        broadcastMessage({ event: 'statusUpdate', message: serverStatuses });
-        break;
-
-      default:
-        console.log('Unhandled data type:', data.type);
-        break;
-    }
+    console.log('Received:', message);
+    ws.send(`Echo: ${message}`);
   });
 
   ws.on('close', () => {
-    console.log('\x1b[35m%s\x1b[0m', 'Client disconnected');
+    console.log('Client disconnected');
     activeConnections.delete(ws);
   });
 });
@@ -132,111 +92,44 @@ const broadcastMessage = (message) => {
   activeConnections.forEach(client => {
       if (client.readyState === WebSocket.OPEN) {
           client.send(JSON.stringify(message));
-          console.log('\x1b[34m%s\x1b[0m', `Sent msg: ${JSON.stringify(message).slice(0,1500)}`);
+          console.log(`Sent msg:\t${JSON.stringify(message)}`)
       }
   });
 };
 
 // Notify all active WebSocket clients to fetch queue
 const sendFetchNotification = () =>{
-  broadcastMessage({ event: 'refresh', message: JSON.stringify('Refreshing...') });
+  broadcastMessage({ event: 'refresh', message: 'Refreshing queue.' });
 }
-// ------------------------------------------------------------------------------------------------------------
-
-
-
-
-// ---------------------------ENDPOINTS----------------------------------
-
-// Get audio stream URL
-app.post('/process', async (req, res) => {
-  console.log('body:', req.body)
-  const { url } = req.body;
-  getAudioUrlAndTitle(url).then(({ title, audioUrl }) =>{
-    res.json({ title: title, url: audioUrl })
-  });
-});
-
-// Get the Current Queue
-app.get('/queue', (req, res) => {
-  db.all(`SELECT * FROM queue ORDER BY id`, (err, rows) => {
-      if (err) {
-      return res.status(500).json({ error: 'Failed to retrieve queue' });
-      }
-      res.json(rows);
-  });
-});
-
-// Add URL to Queue and process title
-app.post('/queue/add', (req, res) => {
-  const { url } = req.body;
-  if (!url || url.startsWith('https://') == false) {
-    return res.status(400).json({ error: 'YouTube URL is required' });
+// --------------------------
+// ------------------------------------------------------------------------------------------------------------------------------------------------------------PLAY
+const play = async () => {
+  let currPlaying = await currentlyPlaying();
+  if (currPlaying == null){
+    console.log(`[play] currently playing: ${currPlaying}`);
+    await processNextFromQueue();
+  }else{
+    _currentAudio.state = "play";
+    console.log(`[play] currently playing: ${currPlaying}`);
+    _currentAudio.duration = JSON.parse(currPlaying).duration;
+    broadcastMessage({ event: 'play', message: JSON.parse(currPlaying).audioUrl });
+    _currentAudio.startIndexIncrement();
   }
+}
 
-  db.run(`INSERT INTO queue (url, status) VALUES (?, 'pending')`, [url], function (err) {
-    if (err) {
-      return res.status(500).json({ error: 'Failed to add to queue' });
-    }
-    res.json({ message: 'URL added to queue', id: this.lastID });
-
-    // processTitle(this.lastID); // process title for the new db entry
-    processNextFromQueue(); // trigger queue processing
-  });
-});
-
-// Skip endpoint
-app.post('/queue/skip', async (req, res) => {
-  skipTrack(res); // Skip the current track
-  res.status(200).send('Track skipped');
-});
-
-
-// Clear Queue
-app.post('/queue/clear', (req, res) => {
-  db.run(`DELETE FROM queue`, (err) => {
-    if (err) return res.status(500).json({ error: 'Failed to clear the queue' });
-    serverStatuses.playState = "pause";
-    stopPlaying();
-    sendFetchNotification();
-    res.json({ message: 'Queue cleared' });
-  });
-});
-
-// Remove track from the queue
-app.post('/queue/remove', (req, res) => {
-  const IdToRemove = req.body.id;
-  db.run(`DELETE FROM queue WHERE id=?`, [IdToRemove], (err) => {
-    if (err) return res.status(500).json({ error: 'Failed to remove from the queue' });
-    sendFetchNotification();
-    res.json({ message: 'Track removed from the queue' });
-  });
-});
-
-// Pause track
-app.post('/queue/pause', (req, res) => {
-  db.run(`UPDATE queue SET status = 'paused' WHERE status = 'playing'`, (err) => {
-    if (err) return res.status(500).json({ error: 'Failed to pause the track' });
-    _currentAudio.stopIndexIncrement();
-    stopPlaying();
-    sendFetchNotification();
-    res.json({ message: 'Track paused' });
-  });
-});
-
-// Resume track
-app.post('/queue/resume', (req, res) => {
-  db.run(`UPDATE queue SET status = 'playing' WHERE status = 'paused'`, (err) => {
-    if (err) return res.status(500).json({ error: 'Failed to resume the track' });
+const next = async () => {
+  _currentAudio.state = "pause";
+  await setTrackStatusToFinish();
+  let currPlaying = await currentlyPlaying();
+  if(currPlaying != null){
+    _currentAudio.state = "play";
     play();
-    sendFetchNotification();
-    res.json({ message: 'Track resumed' });
-  });
-});
-
-
-
-// ------------------------------------------------------FUNCTIONS---------------------------------------------------------------
+    broadcastMessage({ event: 'play', message: JSON.parse(currPlaying).audioUrl });
+    _currentAudio.startIndexIncrement();
+  }else{
+    broadcastMessage({ event: 'queue-end', message: "Queue has ended." });
+  };
+}
 
 const getDuration = async (url) => {
   try {
@@ -263,6 +156,17 @@ const getDuration = async (url) => {
   }
 }
 
+
+// Get audio stream URL
+app.post('/process', async (req, res) => {
+    console.log('body:', req.body)
+    const { url } = req.body;
+    getAudioUrlAndTitle(url).then(({ title, audioUrl }) =>{
+      res.json({ title: title, url: audioUrl })
+    });
+});
+
+
 // Function to get the best audio stream URL using yt-dlp
 const getAudioUrlAndTitle = async (url) => {
   try {
@@ -285,6 +189,80 @@ const getAudioUrlAndTitle = async (url) => {
   }
 };
 
+
+// -----------QUEUE----------------
+
+// Create queue table if it doesn't exist
+db.serialize(() => {
+  db.run(`CREATE TABLE IF NOT EXISTS queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    url TEXT NOT NULL,
+    title TEXT,
+    status TEXT DEFAULT 'pending',
+    audioUrl TEXT,
+    duration INTEGER
+  )`);
+});
+
+// Get the Current Queue
+app.get('/queue', (req, res) => {
+  db.all(`SELECT * FROM queue ORDER BY id`, (err, rows) => {
+      if (err) {
+      return res.status(500).json({ error: 'Failed to retrieve queue' });
+      }
+      res.json(rows);
+  });
+});
+
+// Add URL to Queue and process title
+app.post('/queue/add', (req, res) => {
+  const { url } = req.body;
+  if (!url) {
+    return res.status(400).json({ error: 'YouTube URL is required' });
+  }
+
+  db.run(`INSERT INTO queue (url, status) VALUES (?, 'pending')`, [url], function (err) {
+    if (err) {
+      return res.status(500).json({ error: 'Failed to add to queue' });
+    }
+    res.json({ message: 'URL added to queue', id: this.lastID });
+
+    // processTitle(this.lastID); // process title for the new db entry
+    processNextFromQueue(); // trigger queue processing
+  });
+});
+
+
+// Function to skip the current track
+const skipTrack = async (res) => {
+    console.log('[skipTrack] Skipping current track.');
+    // if (audioStream) {
+    //     console.log('[skipTrack] Terminating FFmpeg instance.');
+    //     audioStream.kill('SIGTERM');
+    //     audioStream = null;
+    // }
+    _currentAudio.resetIndexIncrement();
+    _currentAudio.state = "pause";
+    broadcastMessage({ event: 'track-skipped', message: 'Track skipped.' });
+    next();
+    // streamAudio(res); // Start the next track
+};
+
+// Skip endpoint
+app.post('/queue/skip', async (req, res) => {
+  skipTrack(res); // Skip the current track
+  res.status(200).send('Track skipped');
+});
+
+
+// Clear Queue
+app.post('/queue/clear', (req, res) => {
+  db.run(`DELETE FROM queue`, (err) => {
+    if (err) return res.status(500).json({ error: 'Failed to clear the queue' });
+    res.json({ message: 'Queue cleared' });
+  });
+});
+
 // Get next song from the queue, process streaming url and save it to db
 const processNextFromQueue = async () => {
   // Find the first pending item in the queue
@@ -292,47 +270,13 @@ const processNextFromQueue = async () => {
     db.get(`SELECT * FROM queue WHERE status = 'pending' ORDER BY id LIMIT 1`, (err, item) => {
       if (err) {
         console.error('[processNextFromQueue] Error accessing queue:', err);
+        console.log('[processNextFromQueue] Retrying...');
         reject(err); // Reject the promise with the error
         return;
       }
       if (!item) {
         console.log('[processNextFromQueue] No more links to process.');
-        // End of the queue - Loop queue if it's enabled
-        db.get('SELECT status FROM queue ORDER BY id DESC LIMIT 1', [], (err, row) => {
-          if (err) {
-            console.error(err.message);
-          } else if (row && row.status === 'finished') {
-            console.log('[processNextFromQueue] The queue is finished. Looping queue.');
-            if (serverStatuses.loopQueue === true){
-              db.get(`SELECT * FROM queue WHERE status = 'finished' ORDER BY id LIMIT 1`, (err, item) => {
-                if (err) {
-                  console.error('[processNextFromQueue] Error accessing queue:', err);
-                  reject(err); // Reject the promise with the error
-                  return;
-                }
-                if (!item){
-                  console.log('[processNextFromQueue] No more finished links.');
-                  resolve(null);
-                  return;
-                }
-                db.run(`UPDATE queue SET status = 'pending' WHERE status = 'finished'`, (err) => {
-                  if (err) {
-                    console.error('[processNextFromQueue] Error updating status:', err);
-                  } else {
-                    console.log('[processNextFromQueue] Status updated to pending for all finished songs.');
-                  }
-                });
-                processNextFromQueue();
-                resolve(null);
-                return;
-              });
-            }
-          } else {
-            console.log('[processNextFromQueue] The queue is not finished.');
-          }
-        });
-        
-
+        // setTimeout(processQueue, 5000); // Check again after 5 seconds
         resolve(null);
         return;
       }
@@ -341,6 +285,11 @@ const processNextFromQueue = async () => {
       db.run(`UPDATE queue SET status = 'processing' WHERE id = ?`, [item.id]);
       sendFetchNotification();
 
+      // Run yt-dlp to get the audio URL
+      // getAudioStreamURL(item.url).then(({ title, audioUrl })=> {
+      //   db.run(`UPDATE queue SET status = 'processed', audioUrl = ? WHERE id = ?`, [audioUrl, item.id]);
+      //   sendFetchNotification();
+      // });
       (async () => {
         try {
           const { title, audioUrl } = await getAudioUrlAndTitle(item.url);
@@ -348,9 +297,7 @@ const processNextFromQueue = async () => {
           duration = await getDuration(audioUrl);
           db.run(`UPDATE queue SET status = 'processed', audioUrl = ?, title = ?, duration = ? WHERE id = ?`, [audioUrl, title, duration, item.id,]);
           sendFetchNotification();
-
           play();
-
         } catch (error) {
           console.error(`[processNextFromQueue] Error: `, error.message);
         }
@@ -387,8 +334,8 @@ const reprocessRowById = async (id) => {
   }
 };
 
-
-// returns object item where status = 'playing'
+// ------------------------------------------------------------------------------------------------------------------------------------------------------------currently playing
+// returns object item where status = 'playing', NOTHING PLAYING = FETCHING NEXT PROCESSED, NOTHING PROCESSED = RETURN NULL
 const currentlyPlaying = () => {
   return new Promise((resolve, reject) => {
     db.get(`SELECT * FROM queue WHERE status = 'playing' ORDER BY id LIMIT 1`, (err, item) => {
@@ -427,52 +374,26 @@ const currentlyPlaying = () => {
   });
 };
 
-const play = async () => {
-  console.log(`[play] playState: ${serverStatuses.playState}`);
-  if (serverStatuses.playState == "play"){
-    let currPlaying = await currentlyPlaying();
-    if (currPlaying == null){
-      console.log(`[play] currently playing (null): ${currPlaying}`);
-      await processNextFromQueue();
-    }else{
-      serverStatuses.playState = "play";
-      _currentAudio.duration = JSON.parse(currPlaying).duration;
-      broadcastMessage({ event: 'play', message: currPlaying });
-      _currentAudio.startIndexIncrement();
-    }
-  }
-}
-
-const next = async () => {
-  await stopPlaying();
-  serverStatuses.playState = "play";
-  play();
-}
-
-const stopPlaying = async () => {
+const setTrackStatusToFinish = () => {
   return new Promise((resolve, reject) => {
     db.all(`SELECT * FROM queue WHERE status = 'playing' ORDER BY id`, (err, items) => {
       if (err) {
-        console.error('[stopPlaying] Error accessing queue:', err);
-        console.log('[stopPlaying] Retrying...');
-        setTimeout(stopPlaying, 5000); // Retry after delay on error
-        resolve(err);
+        console.error('[setTrackStatusToFinish] Error accessing queue:', err);
+        reject(err);
         return;
       }
       if (!items || items.length === 0) {
-        console.log('[stopPlaying] Nothing currently playing.');
-        resolve(null);
+        console.log('[setTrackStatusToFinish] Nothing currently playing.');
+        reject(null);
         return;
       }
       items.forEach((item) => {
         db.run(`UPDATE queue SET status = 'finished' WHERE id = ?`, [item.id]);
-        console.log(`[stopPlaying] Finished item with id=${item.id}`);
-        // broadcastMessage({ event: 'track-ended', message: 0 });
-        serverStatuses.playState = "pause";
-        _currentAudio.stopIndexIncrement();
+        console.log(`[setTrackStatusToFinish] Skipped item with id=${item.id}`);
+        // audioStream.kill('SIGTERM');
         sendFetchNotification();
-        resolve(true);
       });
+      resolve();
     });
   });
 }
@@ -515,7 +436,9 @@ const isQueueEmpty = () => {
     });
   });
 }
-// --------------------------------
+
+
+
 
 // shorten links from error messages
 function formatError(err) {
@@ -534,4 +457,4 @@ function formatError(err) {
 
 
 
-server.listen(PORT, () => console.log('\x1b[2m%s\x1b[0m', `Running server on port ${PORT}`))
+server.listen(PORT, () => console.log(`Running server on port ${PORT}`))
