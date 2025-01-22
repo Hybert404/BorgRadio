@@ -24,6 +24,7 @@ import IconButton from '@mui/material/IconButton';
 import CloseIcon from '@mui/icons-material/Close';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
+import UpdateIcon from '@mui/icons-material/Update';
 import '@fontsource/roboto';
 <link
   rel="stylesheet"
@@ -68,6 +69,7 @@ const App = () => {
     currentTime: 0,
   });
   const ws = useRef(null);
+  const intervalRef = useRef(null);  // Use ref to store the interval ID
 
   const pastelink = () => {
     const links = [
@@ -218,12 +220,6 @@ const App = () => {
           case 'statusUpdate':
             setStatuses(data.message); // Update all statuses
             break;
-        // case 'params':
-        //   setLoopQueue(msg.loopQueue);
-        //   setRandomizeQueue(msg.randomizeQueue)
-        //   setIsPlaying(msg.status)
-        //   setInitialStatusReceived(true);
-        //   break;
   
         default:
           console.log('Unhandled event type:', data.event);
@@ -272,28 +268,9 @@ const App = () => {
     return url.length > maxLength ? `${url.substring(0, maxLength)}...` : url;
   };
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setCurrentSong((prev) => {
-        if (prev.currentTime < prev.duration) {
-          return { ...prev, currentTime: prev.currentTime + 1 };
-        } else {
-          clearInterval(interval);
-          return prev;
-        }
-      });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [currentSong.duration]);
-
   const progress = currentSong.duration > 0 
   ? (currentSong.currentTime / currentSong.duration) * 100 
   : 100;
-
-  // const handleTogglePlayPause = async () => {
-  //   setIsPlaying(!isPlaying);
-  // };
 
   useEffect(() => {
 
@@ -305,6 +282,20 @@ const App = () => {
         resume(); //obejście problemu asynca
         
         fetchQueue();  // Refresh queue after clearing
+
+        if (!intervalRef.current) {
+          intervalRef.current = setInterval(() => {
+            setCurrentSong((prev) => {
+              if (prev.currentTime < prev.duration) {
+                return { ...prev, currentTime: prev.currentTime + 1 };
+              } else {
+                clearInterval(intervalRef.current);
+                intervalRef.current = null;  // Reset ref when finished
+                return prev;
+              }
+            });
+          }, 1000);
+        }
       } catch (error) {
         console.error('Error resuming track:', error);
       }
@@ -316,10 +307,23 @@ const App = () => {
         pause(); //obejście problemu asynca
 
         fetchQueue();  // Refresh queue after clearing
+
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);  // Clear the interval on pause
+          intervalRef.current = null;
+        }
+
       } catch (error) {
         console.error('Error pausing track:', error);
       }
     }
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;  // Cleanup on component unmount
+      }
+    };
 
   }, [statuses]);
 
@@ -360,33 +364,6 @@ const App = () => {
 
   const statusKeys = Object.keys(statuses).filter((key) => key !== 'playState'); // Exclude button from checkbox loop
 
-  // const loopQueueChange = (event) => {
-  //   if (initialStatusReceived) {
-  //     const checked = event.target.checked;
-  //     setLoopQueue(checked);  // Update state optimistically
-  //   }
-  // };
-
-  // const randomizeQueueChange = (event) => {
-  //   if (initialStatusReceived) {
-  //     const checked = event.target.checked;
-  //     setRandomizeQueue(checked);  // Update state optimistically
-  //   }
-  // };
-
-  // useEffect(() => {
-  //   if (initialStatusReceived && ws.current && ws.current.readyState === WebSocket.OPEN) {
-  //     ws.current.send(JSON.stringify({
-  //       type: 'params',
-  //       message: {
-  //         'loopQueue': loopQueue,
-  //         'randomizeQueue': randomizeQueue
-  //       }
-  //     }));
-  //   }
-  // }, [loopQueue, randomizeQueue]);
-  
-
   return (
     <Box sx={{ display: 'flex', gap: 2, alignItems: 'left' }}>
       <Box sx={{ id: 'left-panel', display: 'inline', width: '30%', marginTop: '20px', p:4}}>
@@ -401,14 +378,14 @@ const App = () => {
               placeholder="Enter YouTube URL"
               sx={{ flex: 1 }}
             />
-            <Button key='add_to_queue' variant='contained' color='primary' onClick={addToQueue} startIcon={<QueueIcon />}>Add to Queue</Button>
+            <Button variant='contained' color='primary' onClick={addToQueue} startIcon={<QueueIcon />}>Add to Queue</Button>
           </Box>
           
           <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', marginTop: 2}}>
             <Button variant='contained' color='error' onClick={clearQueue} startIcon={<DeleteIcon />}>Clear Queue</Button>
             <Button variant='contained' color='primary' onClick={pasteTest} startIcon={<InsertLinkIcon />}>Paste test link</Button>
             {statusKeys.map((key) => (
-              <FormControlLabel control={<Checkbox checked={statuses[key]} onChange={handleCheckboxChange} name={key} />} label={key} />
+              <FormControlLabel key={key} control={<Checkbox checked={statuses[key]} onChange={handleCheckboxChange} name={key} />} label={key} />
             ))}
           </Box>
           {/* <Button variant='contained' color='primary' onClick={skipQueue} startIcon={<SkipNextIcon />}>Skip</Button> */}
@@ -457,7 +434,7 @@ const App = () => {
         </Box>
       </Box>
       
-      <TableContainer component={Paper} sx={{id: 'right-panel',  width: '70%', margin: 'auto', marginTop: '20px', borderRadius: 5, p:3, fontFamily: 'Roboto', height: '85vh', overflowY: 'scroll'}}>
+      <TableContainer component={Paper} sx={{id: 'right-panel',  width: '70%', margin: 'auto', marginTop: '20px', marginRight:'20px', borderRadius: 5, p:4, fontFamily: 'Roboto', height: '85vh', overflowY: 'auto', paddingRight: '8px'}}>
       <h2>Queue</h2>
       <Table sx={{ minWidth: 650, width: '100%' }} aria-label="simple table">
         <TableHead>
@@ -498,6 +475,8 @@ const App = () => {
                   <DoneAllIcon color="success" />
                 ) : item.status === 'paused' ? (
                   <PauseIcon color="primary" />
+                ) : item.status === 'pending' ? (
+                  <UpdateIcon color="success" />
                 ) : item.status === 'playing' ? (
                   <PlayCircleIcon color="primary" />
                 ) : (
@@ -525,47 +504,6 @@ const App = () => {
        </audio>
       </TableContainer>
     </Box>
-    
-    // <div style={{width: 1000, margin: "0 auto"}}>
-    //   <h2>Queue Manager</h2>
-    //   <input
-    //     type="text"
-    //     value={url}
-    //     onChange={(e) => setUrl(e.target.value)}
-    //     placeholder="Enter YouTube URL"
-    //   />
-    //   <button onClick={addToQueue}>Add to Queue</button>
-    //   <button onClick={clearQueue}>Clear Queue</button>
-    //   <button onClick={skipQueue}>Skip</button>
-    //   <br></br>
-    //   <button onClick={pastelink}>Paste test link</button>
-    //   <button onClick={pasteCount}>1 2 3</button>
-    //   <button onClick={processUrl}>Process</button>
-    //   <br></br>
-    //   <button onClick={testAP}>Test audio player source</button>
-
-    //   <h3>Current Queue</h3>
-    //   <ul>
-    //     {queue.map((item) => (
-    //       <li key={item.id}>
-    //         {item.id} {item.title ? `${item.title} - `:''} 
-    //         {item.url} - {formatDuration(item.duration)} - {item.status} {item.audioUrl ? <a href={item.audioUrl} target="_blank"><button>Open audio url</button></a> : ''}
-    //       </li> 
-    //     ))}
-    //   </ul>
-
-    //   <h3>Now Playing</h3>
-    //   {!isUserInteracted && (
-    //     <button onClick={handleUserInteraction}>Start Audio</button>
-    //   )}
-    //   <button onClick={reloadMusic}>Reload Audio</button>
-    //   <audio controls ref={audioRef}>
-    //     <source src={audioSrc} type="audio/mpeg"/>
-    //     Your browser does not support the audio element.
-    //   </audio>
-      
-    // </div>
-
     
   );
 };
