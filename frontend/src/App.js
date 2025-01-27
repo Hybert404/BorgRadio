@@ -57,6 +57,44 @@ const LinearProgressWithLabel = ({ currentTime, duration }) => {
   );
 };
 
+const LoginPopup = ({ onClose, onLogin }) => {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+
+  const handleLogin = async () => {
+      try {
+          const response = await axios.post('http://localhost:5000/api/login', { username, password });
+          localStorage.setItem('token', response.data.token); // Save the token in localStorage
+          onLogin({ username }); // Pass the logged-in user's data to the parent component
+          alert('Login successful');
+      } catch (err) {
+          setError(err.response?.data?.error || 'Something went wrong');
+      }
+  };
+
+  return (
+      <Box className="popup">
+          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', marginTop: 2}}>
+              <TextField
+                  type="text"
+                  placeholder="Username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+              />
+              <TextField
+                  type="password"
+                  placeholder="Password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+              />
+              <Button variant='contained' onClick={handleLogin}>Login</Button>
+              {error && <p style={{ color: 'red' }}>{error}</p>}
+          </Box>
+      </Box>
+  );
+};
+
 
 const App = () => {
   const [url, setUrl] = useState('');
@@ -75,6 +113,31 @@ const App = () => {
   const ws = useRef(null);
   const intervalRef = useRef(null);  // Use ref to store the interval ID
   const [volume, setVolume] = useState(70); // volume slider
+  const [showPopup, setShowPopup] = useState(false);
+  const [loggedInUser, setLoggedInUser] = useState(null); // Tracks logged-in user info
+
+  useEffect(() => {
+    // Check if token exists in localStorage
+    const token = localStorage.getItem('token');
+    if (token) {
+        // Fetch user info from the backend
+        axios
+            .get('http://localhost:5000/api/userinfo', {
+                headers: { Authorization: `Bearer ${token}` },
+            })
+            .then((response) => {
+                setLoggedInUser(response.data); // Update the user info
+            })
+            .catch(() => {
+                localStorage.removeItem('token'); // Remove invalid token
+            });
+    }
+  }, []);
+
+  const handleLogout = () => {
+    setLoggedInUser(null); // Clear the user info on logout
+    localStorage.removeItem('token'); // Optionally clear token
+  };
 
   const pastelink = () => {
     const links = [
@@ -377,6 +440,28 @@ const App = () => {
   return (
     <Box sx={{ display: 'flex', gap: 2, alignItems: 'left' }}>
       <Box sx={{ id: 'left-panel', display: 'inline', width: '30%', marginTop: '20px', p:4}}>
+        <Box>
+          {loggedInUser ? (
+              <Box>
+                  <span>Welcome, {loggedInUser.username}</span>
+                  <Button onClick={handleLogout} style={{ marginLeft: '10px' }}>
+                      Logout
+                  </Button>
+              </Box>
+          ) : (
+            <Button onClick={() => setShowPopup(!showPopup)}>Sign In</Button>
+          )}
+          
+          {showPopup && (
+            <LoginPopup
+                onClose={() => setShowPopup(false)}
+                onLogin={(userInfo) => {
+                    setLoggedInUser(userInfo); // Update the logged-in user info
+                    setShowPopup(false);
+                }}
+            />
+          )}
+        </Box>
         <Box sx={{id: 'control-buttons',  gap: 1, marginTop: 2, marginBottom: 2}}>
           <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
             <TextField

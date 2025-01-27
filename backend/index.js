@@ -5,6 +5,9 @@ const cors         = require('cors');
 const ffmpeg       = require('fluent-ffmpeg');
 const ffmpegPath   = require('@ffmpeg-installer/ffmpeg').path;
 const WebSocket    = require('ws');
+const bcrypt       = require('bcrypt');
+const bodyParser   = require('body-parser');
+const jwt          = require('jsonwebtoken'); // Optional
 
 let serverStatuses = {
   loopQueue: true,
@@ -18,11 +21,14 @@ const server       = http.createServer(app);
 const wss          = new WebSocket.Server({ server });
 
 const db           = new sqlite3.Database('./queue.db');
-const PORT        = process.env.PORT || 5000
+const dbUsers      = new sqlite3.Database('./users.db');
+const PORT         = process.env.PORT || 5000
+const SECRET_KEY   = 'very-secure-secret-key-1234';
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 app.use(cors());
 app.use(express.json());
+app.use(bodyParser.json());
 
 // Create queue table if it doesn't exist
 db.serialize(() => {
@@ -34,6 +40,18 @@ db.serialize(() => {
     audioUrl TEXT,
     duration INTEGER
   )`);
+});
+
+dbUsers.serialize(() => {
+  dbUsers.run(`CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    pwdHash TEXT NOT NULL
+  )`, (err) => {
+    if (err) {
+        console.error('Error creating table:', err.message);
+    };
+  });
 });
 
 class currentAudio {
@@ -147,6 +165,91 @@ const sendFetchNotification = () =>{
 
 
 // ---------------------------ENDPOINTS----------------------------------
+// ------USERS-------
+
+// Login endpoint
+app.post('/api/login', (req, res) => {
+  const { username, password } = req.body;
+
+  if (!username || !password) {
+      return res.status(400).json({ error: 'Username and password are required.' });
+  }
+
+  // Query the database for the user
+  const sql = `SELECT * FROM users WHERE username = ?`;
+  dbUsers.get(sql, [username], async (err, row) => {
+      if (err) {
+          console.error('Database error:', err.message);
+          return res.status(500).json({ error: 'Internal server error' });
+      }
+
+      if (!row) {
+          return res.status(404).json({ error: 'User not found' });
+      }
+
+      // Compare the provided password with the stored hash
+      const passwordMatch = await bcrypt.compare(password, row.pwdHash);
+      if (!passwordMatch) {
+          return res.status(401).json({ error: 'Invalid credentials' });
+      }
+
+      // Generate a JWT token (optional)
+      const token = jwt.sign({ id: row.id, username: row.username }, SECRET_KEY, { expiresIn: '1h' });
+
+      return res.json({ message: 'Login successful', token });
+  });
+});
+
+// Register endpoint
+app.post('/api/register', async (req, res) => {
+  const { username, password, secret } = req.body;
+  console.log(req.body);
+
+  if (!username || !password) {
+      return res.status(400).json({ error: 'Username and password are required.' });
+  }
+  if (!secret || secret !== '1111') { //completly secure way of authorizing administrator
+    return res.status(400).json({ error: 'You are not authorized to add users.' });
+  }
+
+  try {
+      // Hash the password
+      const saltRounds = 10;
+      const pwdHash = await bcrypt.hash(password, saltRounds);
+
+      // Insert the user into the database
+      const sql = `INSERT INTO users (username, pwdHash) VALUES (?, ?)`;
+      dbUsers.run(sql, [username, pwdHash], function (err) {
+          if (err) {
+              console.error('Error inserting user:', err.message);
+              return res.status(500).json({ error: 'Internal server error' });
+          }
+
+          res.json({ message: 'User registered successfully', userId: this.lastID });
+      });
+  } catch (error) {
+      console.error('Error hashing password:', error.message);
+      res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/userinfo', (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) {
+      return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+      const decoded = jwt.verify(token, SECRET_KEY);
+      res.json({ id: decoded.id, username: decoded.username });
+  } catch (err) {
+      res.status(403).json({ error: 'Invalid token' });
+  }
+});
+
+
+
+// ------QUEUE-------
 
 // Get audio stream URL
 app.post('/process', async (req, res) => {
@@ -515,7 +618,6 @@ const isQueueEmpty = () => {
     });
   });
 }
-// --------------------------------
 
 // shorten links from error messages
 function formatError(err) {
@@ -531,7 +633,6 @@ function formatError(err) {
 
   return message; // If no URL found, return the original message
 }
-
 
 
 server.listen(PORT, () => console.log('\x1b[2m%s\x1b[0m', `Running server on port ${PORT}`))
