@@ -67,7 +67,6 @@ const LoginPopup = ({ onClose, onLogin }) => {
           const response = await axios.post('http://localhost:5000/api/login', { username, password });
           localStorage.setItem('token', response.data.token); // Save the token in localStorage
           onLogin({ username }); // Pass the logged-in user's data to the parent component
-          alert('Login successful');
       } catch (err) {
           setError(err.response?.data?.error || 'Something went wrong');
       }
@@ -462,6 +461,7 @@ const App = () => {
             />
           )}
         </Box>
+        {loggedInUser ? (
         <Box sx={{id: 'control-buttons',  gap: 1, marginTop: 2, marginBottom: 2}}>
           <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
             <TextField
@@ -486,6 +486,7 @@ const App = () => {
           {/* <Button variant='contained' color='primary' onClick={skipQueue} startIcon={<SkipNextIcon />}>Skip</Button> */}
           
         </Box>
+        ):( <Box></Box>)}
 
         <Box component={Paper} sx={{ backgroundColor: '#F7F7F7', padding: 2, textAlign: 'center', borderRadius: 5}}>
           <Typography variant="h6" sx={{ marginBottom: 1 }}>
@@ -495,6 +496,7 @@ const App = () => {
             {currentSong.title}
           </Typography>
 
+          {loggedInUser ? (
           <Stack 
             spacing={2} 
             direction="row" 
@@ -542,7 +544,7 @@ const App = () => {
             {/* Right section - Empty space */}
             <Box sx={{ flex: '1 1 33%' }} />
           </Stack>
-
+          ):( <Box></Box>)}
           
 
           <LinearProgressWithLabel 
@@ -564,7 +566,9 @@ const App = () => {
             <TableCell>AudioURL</TableCell>
             <TableCell>Duration</TableCell>
             <TableCell>Status</TableCell>
+            {loggedInUser ? (
             <TableCell>Control</TableCell>
+            ):( null )}
           </TableRow>
         </TableHead>
         <TableBody>
@@ -602,6 +606,7 @@ const App = () => {
                   item.status
                 )}
               </TableCell>
+              {loggedInUser ? (
               <TableCell>
               <IconButton aria-label="delete" size="small" onClick={() => handleDelete(item.id)}>
                 <DeleteIcon />
@@ -610,6 +615,7 @@ const App = () => {
                 <PlayArrowIcon />
               </IconButton>
               </TableCell>
+              ):( null )}
             </TableRow>
           ))}
         </TableBody>
