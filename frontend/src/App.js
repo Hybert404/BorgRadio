@@ -1,39 +1,56 @@
 import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
-import Table from '@mui/material/Table';
-import TableBody from '@mui/material/TableBody';
-import TableCell from '@mui/material/TableCell';
-import TableContainer from '@mui/material/TableContainer';
-import TableHead from '@mui/material/TableHead';
-import TableRow from '@mui/material/TableRow';
-import Paper from '@mui/material/Paper';
-import { Box, Button, TextField, LinearProgress, Typography } from '@mui/material';
+
+// Material-UI Components
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  Box,
+  Button,
+  TextField,
+  LinearProgress,
+  Typography,
+  Chip,
+  Autocomplete,
+  FormControlLabel,
+  Checkbox,
+  Stack,
+  Slider,
+  IconButton,
+  Fab,
+  CircularProgress,
+} from '@mui/material';
+
+// Material-UI Icons
 import DeleteIcon from '@mui/icons-material/Delete';
 import SkipNextIcon from '@mui/icons-material/SkipNext';
 import SkipPreviousIcon from '@mui/icons-material/SkipPrevious';
 import InsertLinkIcon from '@mui/icons-material/InsertLink';
 import CheckIcon from '@mui/icons-material/Check';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
-import CircularProgress from '@mui/material/CircularProgress';
 import DoneAllIcon from '@mui/icons-material/DoneAll';
 import QueueIcon from '@mui/icons-material/Queue';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
-import Fab from '@mui/material/Fab';
-import IconButton from '@mui/material/IconButton';
 import CloseIcon from '@mui/icons-material/Close';
-import FormControlLabel from '@mui/material/FormControlLabel';
-import Checkbox from '@mui/material/Checkbox';
 import UpdateIcon from '@mui/icons-material/Update';
-import Stack from '@mui/material/Stack';
-import Slider from '@mui/material/Slider';
 import VolumeDown from '@mui/icons-material/VolumeDown';
 import VolumeUp from '@mui/icons-material/VolumeUp';
+
+// Fonts
 import '@fontsource/roboto';
+
+// External CSS or Links
 <link
   rel="stylesheet"
   href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap"
 />
+
 
 const LinearProgressWithLabel = ({ currentTime, duration }) => {
   // Format time (seconds) into mm:ss
@@ -98,6 +115,8 @@ const LoginPopup = ({ onClose, onLogin }) => {
 const App = () => {
   const [url, setUrl] = useState('');
   const [queue, setQueue] = useState([]);
+  const [availableTags, setAvailableTags] = useState([]);
+  const [selectedTags, setSelectedTags] = useState([]);
   const [audioSrc, setAudioSrc] = useState(''); // State to manage the audio source
   const audioRef = useRef(null); // Reference to the audio player
   const [statuses, setStatuses] = useState({});  // All statuses in one object
@@ -175,11 +194,32 @@ const App = () => {
     }
   };
 
+  // Fetch all tags
+  const fetchTags = async () => {
+    try {
+      const response = await axios.get('http://localhost:5000/queue/tags');
+      console.log('Tags:', response.data);
+      setAvailableTags(response.data);
+    } catch (error) {
+      console.error('Error fetching tags:', error.response?.data || error.message);
+    }
+  };
+
   // Add URL to the queue
   const addToQueue = async () => {
     try {
-      await axios.post('http://localhost:5000/queue/add', { url });
+      const token = localStorage.getItem('token');
+      await axios.post(
+        'http://localhost:5000/queue/add',
+        { url, tags: selectedTags }, // Request body
+        {
+            headers: {
+                Authorization: `Bearer ${token}`, // Add token to the Authorization header
+            },
+        }
+      );
       setUrl('');
+      setSelectedTags([]);
       fetchQueue();  // Refresh queue after adding
     } catch (error) {
       console.error('Error adding to queue:', error.response?.data || error.message);
@@ -208,6 +248,7 @@ const App = () => {
 
   useEffect(() => {
     fetchQueue();  // Fetch queue when the component loads
+    fetchTags();  // Fetch tags when the component loads
   
     // WebSocket setup
     ws.current = new WebSocket('ws://localhost:5000');
@@ -248,6 +289,7 @@ const App = () => {
   
         case 'refresh':
           fetchQueue();
+          fetchTags();
           break;
   
         case 'play':
@@ -434,6 +476,51 @@ const App = () => {
     //TODO
   };
 
+  const handleTagsChange = (event, value) => {
+    // Trim whitespace from each tag and convert to lowercase for comparison
+    const trimmedTags = value.map((tag) => tag.trim().toLowerCase());
+  
+    // Remove duplicate tags
+    const uniqueTags = [...new Set(trimmedTags)];
+  
+    // Update the state with the cleaned and deduplicated tags
+    setSelectedTags(uniqueTags);
+  };
+
+  const colorMap = {};
+  const selectedColors = {};
+
+  const generateColor = () => {
+    let randomColorString = "#";
+    const arrayOfColorFunctions = "0123456789abcdef";
+    for (let x = 0; x < 6; x++) {
+      let index = Math.floor(Math.random() * 16);
+      let value = arrayOfColorFunctions[index];
+
+      randomColorString += value;
+    }
+    return randomColorString;
+  };
+
+  const newColorFind = (id) => {
+    // If already generated and assigned, return
+    if (colorMap[id]) return colorMap[id];
+
+    // Generate new random color
+    let newColor;
+
+    do {
+      newColor = generateColor();
+    } while(selectedColors[newColor]);
+
+    // Found a new random, unassigned color
+    colorMap[id] = newColor;
+    selectedColors[newColor] = true;
+
+    // Return next new color
+    return newColor;
+  }
+
   const statusKeys = Object.keys(statuses).filter((key) => key !== 'playState'); // Exclude button from checkbox loop
 
   return (
@@ -474,6 +561,34 @@ const App = () => {
               sx={{ flex: 1 }}
             />
             <Button variant='contained' color='primary' onClick={addToQueue} startIcon={<QueueIcon />}>Add to Queue</Button>
+          </Box>
+
+          {/* Tags */}
+          <Box sx={{ marginTop: 2 }}>
+            <Autocomplete
+              multiple
+              id="tags-filled"
+              options={availableTags}
+              value={selectedTags}
+              freeSolo
+              onChange={handleTagsChange}
+              renderTags={(value, getTagProps) =>
+                value.map((option, index) => {
+                  const { key, ...tagProps } = getTagProps({ index });
+                  return (
+                    <Chip variant="outlined" label={option} key={key} {...tagProps} />
+                  );
+                })
+              }
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  variant="filled"
+                  label="Tags"
+                  placeholder="Press <enter> to add tags"
+                />
+              )}
+            />
           </Box>
           
           <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', marginTop: 2}}>
@@ -565,6 +680,7 @@ const App = () => {
             <TableCell>URL</TableCell>
             <TableCell>AudioURL</TableCell>
             <TableCell>Duration</TableCell>
+            <TableCell>Tags</TableCell>
             <TableCell>Status</TableCell>
             {loggedInUser ? (
             <TableCell>Control</TableCell>
@@ -589,6 +705,13 @@ const App = () => {
                 )}
               </TableCell>
               <TableCell>{formatDuration(item.duration)}</TableCell>
+              <TableCell>
+                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                  {item.tags.map((tag, index) => (
+                    <Chip key={index} label={tag} size="small" style={{backgroundColor: newColorFind(index) }}/>
+                  ))}
+                </Box>
+              </TableCell>
               <TableCell>
                 {item.status === 'processing' ? (
                   <CircularProgress size={24} />

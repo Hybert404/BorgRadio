@@ -8,6 +8,8 @@ const WebSocket    = require('ws');
 const bcrypt       = require('bcrypt');
 const bodyParser   = require('body-parser');
 const jwt          = require('jsonwebtoken'); // Optional
+const authenticateToken = require('./middleware/authenticateToken'); // Middleware
+const SECRET_KEY  = require('./middleware/SECRET_KEY'); // Secret key for JWT
 
 let serverStatuses = {
   loopQueue: true,
@@ -25,7 +27,7 @@ const wss          = new WebSocket.Server({ server });
 const db           = new sqlite3.Database('./queue.db');
 const dbUsers      = new sqlite3.Database('./users.db');
 const PORT         = process.env.PORT || 5000
-const SECRET_KEY   = 'very-secure-secret-key-1234';
+
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 app.use(cors());
@@ -40,7 +42,8 @@ db.serialize(() => {
     title TEXT,
     status TEXT DEFAULT 'pending',
     audioUrl TEXT,
-    duration INTEGER
+    duration INTEGER,
+    tags TEXT
   )`);
 });
 
@@ -268,18 +271,27 @@ app.get('/queue', (req, res) => {
       if (err) {
       return res.status(500).json({ error: 'Failed to retrieve queue' });
       }
-      res.json(rows);
+
+      const queue = rows.map((row) => ({
+        ...row,
+        tags: JSON.parse(row.tags || '[]'),
+      }));
+
+      res.json(queue);
   });
 });
 
 // Add URL to Queue and process title
-app.post('/queue/add', (req, res) => {
-  const { url } = req.body;
+app.post('/queue/add', authenticateToken, (req, res) => {
+  const { url, tags } = req.body;
   if (!url || url.startsWith('https://') == false) {
     return res.status(400).json({ error: 'YouTube URL is required' });
   }
 
-  db.run(`INSERT INTO queue (url, status) VALUES (?, 'pending')`, [url], function (err) {
+  const tagsExtended = tags ? [req.user.username, ...tags] : [req.user.username]; // Add the user's username as a tag (at least username)
+  const tagsJson = JSON.stringify(tagsExtended); // Convert tags array to JSON string
+
+  db.run(`INSERT INTO queue (url, status, tags) VALUES (?, 'pending', ?)`, [url, tagsJson], function (err) {
     if (err) {
       return res.status(500).json({ error: 'Failed to add to queue' });
     }
@@ -298,7 +310,7 @@ app.post('/queue/skip', async (req, res) => {
 
 
 // Clear Queue
-app.post('/queue/clear', (req, res) => {
+app.post('/queue/clear', authenticateToken, (req, res) => {
   db.run(`DELETE FROM queue`, (err) => {
     if (err) return res.status(500).json({ error: 'Failed to clear the queue' });
     serverStatuses.playState = "pause";
@@ -309,7 +321,7 @@ app.post('/queue/clear', (req, res) => {
 });
 
 // Remove track from the queue
-app.post('/queue/remove', (req, res) => {
+app.post('/queue/remove', authenticateToken, (req, res) => {
   const IdToRemove = req.body.id;
   db.run(`DELETE FROM queue WHERE id=?`, [IdToRemove], (err) => {
     if (err) return res.status(500).json({ error: 'Failed to remove from the queue' });
@@ -338,6 +350,26 @@ app.post('/queue/resume', (req, res) => {
     res.json({ message: 'Track resumed' });
   });
 });
+
+// Get all available tags
+app.get('/queue/tags', (req, res) => {
+  db.all(`SELECT tags FROM queue ORDER BY id`, (err, rows) => {
+    if (err) {
+      return res.status(500).json({ error: 'Failed to retrieve tags' });
+    }
+
+    // Extract and merge all tags into a single array
+    const allTags = rows
+      .map((row) => JSON.parse(row.tags || '[]')) // Parse JSON string into arrays
+      .flat(); // Flatten the array of arrays
+
+    // Remove duplicates by using a Set
+    const uniqueTags = [...new Set(allTags)];
+
+    res.json(uniqueTags); // Return the unique tags as an array
+  });
+});
+
 
 
 
