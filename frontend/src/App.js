@@ -117,9 +117,15 @@ const App = () => {
   const [queue, setQueue] = useState([]);
   const [availableTags, setAvailableTags] = useState([]);
   const [selectedTags, setSelectedTags] = useState([]);
+  const [tagColors, setTagColors] = useState({});
   const [audioSrc, setAudioSrc] = useState(''); // State to manage the audio source
   const audioRef = useRef(null); // Reference to the audio player
-  const [statuses, setStatuses] = useState({});  // All statuses in one object
+  const [statuses, setStatuses] = useState({
+    loopQueue: false,
+    randomizeQueue: false,
+    playState: 'pause',
+    filters: []  // Initialize empty Set
+  });
   const [currentSong, setCurrentSong] = useState({
     id: null,
     url: null,
@@ -133,6 +139,7 @@ const App = () => {
   const [volume, setVolume] = useState(70); // volume slider
   const [showPopup, setShowPopup] = useState(false);
   const [loggedInUser, setLoggedInUser] = useState(null); // Tracks logged-in user info
+  const [urlHelperText, setUrlHelperText] = useState(''); // Helper text for the URL input
 
   useEffect(() => {
     // Check if token exists in localStorage
@@ -198,8 +205,13 @@ const App = () => {
   const fetchTags = async () => {
     try {
       const response = await axios.get('http://localhost:5000/queue/tags');
-      console.log('Tags:', response.data);
-      setAvailableTags(response.data);
+
+      setTagColors(response.data);  // Set the tag colors
+
+      // Convert the { tag: color } object into an array of tags
+      const tagsArray = Object.keys(response.data);
+
+      setAvailableTags(tagsArray);
     } catch (error) {
       console.error('Error fetching tags:', error.response?.data || error.message);
     }
@@ -222,7 +234,8 @@ const App = () => {
       setSelectedTags([]);
       fetchQueue();  // Refresh queue after adding
     } catch (error) {
-      console.error('Error adding to queue:', error.response?.data || error.message);
+      // console.error('Error adding to queue:', error.response?.data || error.message);
+      setUrlHelperText('Invalid URL');
     }
   };
 
@@ -366,8 +379,15 @@ const App = () => {
 
   const formatDuration = (durationInSeconds) => {
     if (!durationInSeconds) return '00:00';
-    const minutes = Math.floor(durationInSeconds / 60);
+    
+    const hours = Math.floor(durationInSeconds / 3600);
+    const minutes = Math.floor((durationInSeconds % 3600) / 60);
     const seconds = Math.floor(durationInSeconds % 60);
+    
+    if (hours > 0) {
+      return `${hours.toString().padStart(1, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
+    
     return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   };
 
@@ -487,45 +507,43 @@ const App = () => {
     setSelectedTags(uniqueTags);
   };
 
-  const colorMap = {};
-  const selectedColors = {};
-
-  const generateColor = () => {
-    let randomColorString = "#";
-    const arrayOfColorFunctions = "0123456789abcdef";
-    for (let x = 0; x < 6; x++) {
-      let index = Math.floor(Math.random() * 16);
-      let value = arrayOfColorFunctions[index];
-
-      randomColorString += value;
-    }
-    return randomColorString;
+  const tagColorFind = (tag) => {
+    return tagColors[tag] || "#CCCCCC"; // Default to light gray if the tag is not found
   };
 
-  const newColorFind = (id) => {
-    // If already generated and assigned, return
-    if (colorMap[id]) return colorMap[id];
+  const handleTagFilter = (tag) => {
+    const currentFilters = Array.isArray(statuses.filters) ? statuses.filters : [];
+    const newFilters = currentFilters.includes(tag)
+      ? currentFilters.filter(t => t !== tag)
+      : [...currentFilters, tag];
+  
+    // Update state with new filters
+    setStatuses(prev => ({
+      ...prev,
+      filters: newFilters
+    }));
+  
+    // Send update via WebSocket if connected
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ 
+        type: 'statusUpdate', 
+        status: {"filters": newFilters} 
+      }));
+    }
+  };
 
-    // Generate new random color
-    let newColor;
+  const filteredQueue = queue.filter(item => {
+    if (!Array.isArray(statuses.filters) || statuses.filters.length === 0) {
+      return true;
+    }
+    return item.tags.some(tag => statuses.filters.includes(tag));
+  });
 
-    do {
-      newColor = generateColor();
-    } while(selectedColors[newColor]);
-
-    // Found a new random, unassigned color
-    colorMap[id] = newColor;
-    selectedColors[newColor] = true;
-
-    // Return next new color
-    return newColor;
-  }
-
-  const statusKeys = Object.keys(statuses).filter((key) => key !== 'playState'); // Exclude button from checkbox loop
+  const statusKeys = Object.keys(statuses).filter((key) => key !== 'playState' && key !== 'filters'); // Exclude button from checkbox loop
 
   return (
-    <Box sx={{ display: 'flex', gap: 2, alignItems: 'left' }}>
-      <Box sx={{ id: 'left-panel', display: 'inline', width: '30%', marginTop: '20px', p:4}}>
+    <Box sx={{ display: 'flex', gap: 4, alignItems: 'top', p:4}}>
+      <Box sx={{ id: 'left-panel', display: 'inline', width: '30%', marginTop: '20px'}}>
         <Box>
           {loggedInUser ? (
               <Box>
@@ -550,14 +568,19 @@ const App = () => {
         </Box>
         {loggedInUser ? (
         <Box sx={{id: 'control-buttons',  gap: 1, marginTop: 2, marginBottom: 2}}>
-          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', minHeight: '80px' }}>
             <TextField
               variant='outlined'
               size='small'
               type="text"
               value={url}
-              onChange={(e) => setUrl(e.target.value)}
+              onChange={(e) => {
+                setUrl(e.target.value)
+                setUrlHelperText('') // Clear the error message
+                }}
               placeholder="Enter YouTube URL"
+              helperText={urlHelperText}
+              error={Boolean(urlHelperText)} // Turns red if error exists
               sx={{ flex: 1 }}
             />
             <Button variant='contained' color='primary' onClick={addToQueue} startIcon={<QueueIcon />}>Add to Queue</Button>
@@ -669,88 +692,109 @@ const App = () => {
           />
         </Box>
       </Box>
-      
-      <TableContainer component={Paper} sx={{id: 'right-panel',  width: '70%', margin: 'auto', marginTop: '20px', marginRight:'20px', borderRadius: 5, p:4, fontFamily: 'Roboto', height: '85vh', overflowY: 'auto', paddingRight: '8px'}}>
-      <h2>Queue</h2>
-      <Table sx={{ minWidth: 650, width: '100%' }} aria-label="simple table">
-        <TableHead>
-          <TableRow>
-            <TableCell>ID</TableCell>
-            <TableCell>Title</TableCell>
-            <TableCell>URL</TableCell>
-            <TableCell>AudioURL</TableCell>
-            <TableCell>Duration</TableCell>
-            <TableCell>Tags</TableCell>
-            <TableCell>Status</TableCell>
-            {loggedInUser ? (
-            <TableCell>Control</TableCell>
-            ):( null )}
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {queue.map((item) => (
-            <TableRow key={item.id}>
-              <TableCell>{item.id}</TableCell>
-              <TableCell>{item.title}</TableCell>
-              <TableCell>{item.url}</TableCell>
-              <TableCell>
-                {typeof item.audioUrl === 'string' && item.audioUrl.startsWith('https:') ? (
-                  <CheckIcon color="success" />
-                ) : item.audioUrl ? (
-                  item.audioUrl
-                ) : isNaN ? (
-                  <CloseIcon color="warning"></CloseIcon>
-                ): (
-                  <Typography color="error">Error</Typography>
-                )}
-              </TableCell>
-              <TableCell>{formatDuration(item.duration)}</TableCell>
-              <TableCell>
-                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                  {item.tags.map((tag, index) => (
-                    <Chip key={index} label={tag} size="small" style={{backgroundColor: newColorFind(index) }}/>
-                  ))}
-                </Box>
-              </TableCell>
-              <TableCell>
-                {item.status === 'processing' ? (
-                  <CircularProgress size={24} />
-                ) : item.status === 'processed' ? (
-                  <CheckIcon color="success" />
-                ) : item.status === 'finished' ? (
-                  <DoneAllIcon color="success" />
-                ) : item.status === 'paused' ? (
-                  <PauseIcon color="primary" />
-                ) : item.status === 'pending' ? (
-                  <UpdateIcon color="success" />
-                ) : item.status === 'playing' ? (
-                  <PlayCircleIcon color="primary" />
-                ) : (
-                  item.status
-                )}
-              </TableCell>
+
+      <Box sx={{id: 'right-panel', display: 'inline', width: '70%', margin: 'auto'}}>
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', justifyContent: 'center', marginTop: '20px'}}>
+          {Object.keys(tagColors).map((key, item) => (
+            <Chip
+              key={item} 
+              label={key} 
+              size="small"
+              sx={{
+                backgroundColor: Array.isArray(statuses.filters) && statuses.filters.includes(key) ? 'white' : tagColors[key],
+                border: Array.isArray(statuses.filters) && statuses.filters.includes(key) ? `4px solid ${tagColors[key]}` : 'none',
+                boxShadow: Array.isArray(statuses.filters) && statuses.filters.includes(key) ? 3 : 0,
+                transform: Array.isArray(statuses.filters) && statuses.filters.includes(key) ? 'scale(1.2)' : 'scale(1)',
+                transition: 'all 0.2s ease-in-out'
+              }}
+              onClick={() => handleTagFilter(key)}
+            />
+          ))}
+        </Box>
+        <TableContainer component={Paper} sx={{p:2, marginTop: '20px', marginRight:'20px', borderRadius: 5, fontFamily: 'Roboto', height: '80vh', overflowY: 'auto', paddingRight: '8px'}}>
+        <h2>Queue</h2>
+        <Table sx={{ minWidth: 650, width: '100%' }} aria-label="simple table">
+          <TableHead>
+            <TableRow>
+              <TableCell>ID</TableCell>
+              <TableCell>Title</TableCell>
+              <TableCell>URL</TableCell>
+              <TableCell>AudioURL</TableCell>
+              <TableCell>Duration</TableCell>
+              <TableCell>Tags</TableCell>
+              <TableCell>Status</TableCell>
               {loggedInUser ? (
-              <TableCell>
-              <IconButton aria-label="delete" size="small" onClick={() => handleDelete(item.id)}>
-                <DeleteIcon />
-              </IconButton>
-              <IconButton color="success" size="small" onClick={() => handlePlay(item.id)}>
-                <PlayArrowIcon />
-              </IconButton>
-              </TableCell>
+              <TableCell>Controls</TableCell>
               ):( null )}
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-      
-      
+          </TableHead>
+          <TableBody>
+            {filteredQueue
+              .map((item) => (
+                <TableRow key={item.id}>
+                  <TableCell>{item.id}</TableCell>
+                  <TableCell>{item.title}</TableCell>
+                  <TableCell width="10%">{item.url}</TableCell>
+                  <TableCell>
+                    {typeof item.audioUrl === 'string' && item.audioUrl.startsWith('https:') ? (
+                      <CheckIcon color="success" />
+                    ) : item.audioUrl ? (
+                      item.audioUrl
+                    ) : isNaN ? (
+                      <CloseIcon color="warning"></CloseIcon>
+                    ): (
+                      <Typography color="error">Error</Typography>
+                    )}
+                  </TableCell>
+                  <TableCell>{formatDuration(item.duration)}</TableCell>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                      {item.tags.map((tag, index) => (
+                        <Chip key={index} label={tag} size="small" style={{backgroundColor: tagColorFind(tag) }}/>
+                      ))}
+                    </Box>
+                  </TableCell>
+                  <TableCell>
+                    {item.status === 'processing' ? (
+                      <CircularProgress size={24} />
+                    ) : item.status === 'processed' ? (
+                      <CheckIcon color="success" />
+                    ) : item.status === 'finished' ? (
+                      <DoneAllIcon color="success" />
+                    ) : item.status === 'paused' ? (
+                      <PauseIcon color="primary" />
+                    ) : item.status === 'pending' ? (
+                      <UpdateIcon color="success" />
+                    ) : item.status === 'playing' ? (
+                      <PlayCircleIcon color="primary" />
+                    ) : (
+                      item.status
+                    )}
+                  </TableCell>
+                  {loggedInUser ? (
+                  <TableCell>
+                    <IconButton aria-label="delete" size="small" onClick={() => handleDelete(item.id)}>
+                      <DeleteIcon />
+                    </IconButton>
+                    <IconButton color="success" size="small" onClick={() => handlePlay(item.id)}>
+                      <PlayArrowIcon />
+                    </IconButton>
+                  </TableCell>
+                  ):( null )}
+                </TableRow>
+              ))
+            }
+          </TableBody>
+        </Table>
+        
+        
 
-      <audio controls ref={audioRef}>
-         <source src={audioSrc} type="audio/mpeg"/>
-          Your browser does not support the audio element.
-       </audio>
-      </TableContainer>
+        <audio controls ref={audioRef}>
+          <source src={audioSrc} type="audio/mpeg"/>
+            Your browser does not support the audio element.
+        </audio>
+        </TableContainer>
+      </Box>
     </Box>
     
   );

@@ -10,11 +10,13 @@ const bodyParser   = require('body-parser');
 const jwt          = require('jsonwebtoken'); // Optional
 const authenticateToken = require('./middleware/authenticateToken'); // Middleware
 const SECRET_KEY  = require('./middleware/SECRET_KEY'); // Secret key for JWT
+const generateHexColor = require('./additional functions/generateHexColor');
 
 let serverStatuses = {
   loopQueue: true,
   randomizeQueue: false,
-  playState: false
+  playState: false,
+  filters: [],
 };
 
 let shuffledQueue = [];
@@ -26,6 +28,7 @@ const wss          = new WebSocket.Server({ server });
 
 const db           = new sqlite3.Database('./queue.db');
 const dbUsers      = new sqlite3.Database('./users.db');
+const dbTagColors  = new sqlite3.Database('./tagColors.db');
 const PORT         = process.env.PORT || 5000
 
 
@@ -52,6 +55,18 @@ dbUsers.serialize(() => {
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL,
     pwdHash TEXT NOT NULL
+  )`, (err) => {
+    if (err) {
+        console.error('Error creating table:', err.message);
+    };
+  });
+});
+
+dbTagColors.serialize(() => {
+  dbTagColors.run(`CREATE TABLE IF NOT EXISTS tagColors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tag TEXT NOT NULL,
+    color TEXT NOT NULL
   )`, (err) => {
     if (err) {
         console.error('Error creating table:', err.message);
@@ -297,7 +312,27 @@ app.post('/queue/add', authenticateToken, (req, res) => {
     }
     res.json({ message: 'URL added to queue', id: this.lastID });
 
-    // processTitle(this.lastID); // process title for the new db entry
+    // Process each tag in tagsExtended
+    tagsExtended.forEach(tag => {
+      dbTagColors.get(`SELECT * FROM tagColors WHERE tag = ?`, [tag], (err, row) => {
+          if (err) {
+              console.error(`Error checking tag: ${tag}`, err.message);
+              return;
+          }
+
+          // If the tag does not exist, insert it with a new color
+          if (!row) {
+            dbTagColors.run(`INSERT INTO tagColors (tag, color) VALUES (?, ?)`, [tag, generateHexColor()], (err) => {
+                  if (err) {
+                      console.error(`Error inserting tag: ${tag}`, err.message);
+                  } else {
+                      // console.log(`Tag '${tag}' added with color assigned.`);
+                  }
+              });
+          }
+      });
+    });
+
     processNextFromQueue(); // trigger queue processing
   });
 });
@@ -353,20 +388,17 @@ app.post('/queue/resume', (req, res) => {
 
 // Get all available tags
 app.get('/queue/tags', (req, res) => {
-  db.all(`SELECT tags FROM queue ORDER BY id`, (err, rows) => {
+  dbTagColors.all(`SELECT tag, color FROM tagColors ORDER BY id`, (err, rows) => {
     if (err) {
       return res.status(500).json({ error: 'Failed to retrieve tags' });
     }
 
-    // Extract and merge all tags into a single array
-    const allTags = rows
-      .map((row) => JSON.parse(row.tags || '[]')) // Parse JSON string into arrays
-      .flat(); // Flatten the array of arrays
+    const tagColorMap = rows.reduce((acc, row) => {
+      acc[row.tag] = row.color;
+      return acc;
+    }, {});
 
-    // Remove duplicates by using a Set
-    const uniqueTags = [...new Set(allTags)];
-
-    res.json(uniqueTags); // Return the unique tags as an array
+    res.json(tagColorMap); // Return the unique tags as an array
   });
 });
 
