@@ -1,6 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 
+// Custom functions
+import useSnackbar from './additional functions/snackbar';
+
 // Material-UI Components
 import {
   Table,
@@ -24,6 +27,8 @@ import {
   IconButton,
   Fab,
   CircularProgress,
+  Snackbar,
+  Alert,
 } from '@mui/material';
 
 // Material-UI Icons
@@ -113,6 +118,7 @@ const LoginPopup = ({ onClose, onLogin }) => {
 
 
 const App = () => {
+  const { state, showSnackbar, handleClose } = useSnackbar();
   const [url, setUrl] = useState('');
   const [queue, setQueue] = useState([]);
   const [availableTags, setAvailableTags] = useState([]);
@@ -197,6 +203,7 @@ const App = () => {
       const response = await axios.get('http://localhost:5000/queue');
       setQueue(response.data);
     } catch (error) {
+      showSnackbar('Error connecting to server', 5000);
       console.error('Error fetching queue:', error.response?.data || error.message);
     }
   };
@@ -242,7 +249,15 @@ const App = () => {
   // Clear the entire queue
   const clearQueue = async () => {
     try {
-      await axios.post('http://localhost:5000/queue/clear');
+      const token = localStorage.getItem('token');
+      await axios.post(
+        'http://localhost:5000/queue/clear',
+        {
+            headers: {
+                Authorization: `Bearer ${token}`, // Add token to the Authorization header
+            },
+        }
+      );
       fetchQueue();  // Refresh queue after clearing
     } catch (error) {
       console.error('Error clearing queue:', error.response?.data || error.message);
@@ -362,20 +377,6 @@ const App = () => {
   useEffect(() => {
     audioRef.current.load();
   }, [audioSrc]);
-  
-
-  const processUrl = async () => {
-    try {
-      const response = await axios.post(
-        'http://localhost:5000/process',
-        { url: url },
-        { headers: { 'Content-Type': 'application/json' } } // Ensure the header is set to JSON
-      );
-      console.log(response.data); // Log the response to see the audio URL
-    } catch (error) {
-      console.error('Error fetching audio URL:', error);
-    }
-  };
 
   const formatDuration = (durationInSeconds) => {
     if (!durationInSeconds) return '00:00';
@@ -431,7 +432,12 @@ const App = () => {
     }else if (statuses.playState === 'pause'){
       try {
         async function pause(){
-          await axios.post('http://localhost:5000/queue/pause');
+          try{
+            await axios.post('http://localhost:5000/queue/pause');
+          }catch (error) {
+            console.error('Error pausing track:', error);
+          }
+          
         }
         pause(); //obejście problemu asynca
 
@@ -459,7 +465,16 @@ const App = () => {
   const handleDelete = async (id) => {
     setQueue((prevQueue) => prevQueue.filter(item => item.id !== id));
     try {
-      await axios.post('http://localhost:5000/queue/remove', {id});
+      const token = localStorage.getItem('token');
+      await axios.post(
+        'http://localhost:5000/queue/remove',
+        { id }, // Request body
+        {
+            headers: {
+                Authorization: `Bearer ${token}`, // Add token to the Authorization header
+            },
+        }
+      );
       fetchQueue();  // Refresh queue after clearing
     } catch (error) {
       console.error('Error clearing queue:', error);
@@ -543,6 +558,13 @@ const App = () => {
 
   return (
     <Box sx={{ display: 'flex', gap: 4, alignItems: 'top', p:4}}>
+      <Snackbar
+        anchorOrigin={{ vertical: state.vertical, horizontal: state.horizontal }}
+        open={state.open}
+        onClose={handleClose}
+        message={state.message}
+        key={state.vertical + state.horizontal}
+      />
       <Box sx={{ id: 'left-panel', display: 'inline', width: '30%', marginTop: '20px'}}>
         <Box>
           {loggedInUser ? (
