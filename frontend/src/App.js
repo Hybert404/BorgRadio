@@ -29,6 +29,7 @@ import {
   CircularProgress,
   Snackbar,
   Alert,
+  Tooltip,
 } from '@mui/material';
 
 // Material-UI Icons
@@ -548,9 +549,11 @@ const App = () => {
   };
 
   const filteredQueue = queue.filter(item => {
+    // If no filters are set, show all items
     if (!Array.isArray(statuses.filters) || statuses.filters.length === 0) {
       return true;
     }
+    // Show items that have at least one matching tag
     return item.tags.some(tag => statuses.filters.includes(tag));
   });
 
@@ -777,21 +780,23 @@ const App = () => {
                     </Box>
                   </TableCell>
                   <TableCell>
-                    {item.status === 'processing' ? (
-                      <CircularProgress size={24} />
-                    ) : item.status === 'processed' ? (
-                      <CheckIcon color="success" />
-                    ) : item.status === 'finished' ? (
-                      <DoneAllIcon color="success" />
-                    ) : item.status === 'paused' ? (
-                      <PauseIcon color="primary" />
-                    ) : item.status === 'pending' ? (
-                      <UpdateIcon color="success" />
-                    ) : item.status === 'playing' ? (
-                      <PlayCircleIcon color="primary" />
-                    ) : (
-                      item.status
-                    )}
+                    <Tooltip title={item.status}>
+                      {item.status === 'processing' ? (
+                        <CircularProgress size={24} />
+                      ) : item.status === 'processed' ? (
+                        <CheckIcon color="success" />
+                      ) : item.status === 'finished' ? (
+                        <DoneAllIcon color="success" />
+                      ) : item.status === 'paused' ? (
+                        <PauseIcon color="primary" />
+                      ) : item.status === 'pending' ? (
+                        <UpdateIcon color="success" />
+                      ) : item.status === 'playing' ? (
+                        <PlayCircleIcon color="primary" />
+                      ) : (
+                        item.status
+                      )}
+                    </Tooltip>
                   </TableCell>
                   {loggedInUser ? (
                   <TableCell>

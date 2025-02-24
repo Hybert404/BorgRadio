@@ -19,7 +19,7 @@ app.use(require('./routes/userMgmt.js'));
 
 // External functions
 
-const { authenticateToken } = require('./middleware/authenticateToken.js'); // Middleware
+const authenticateToken = require('./middleware/authenticateToken.js'); // Middleware
 const { broadcastMessage, sendFetchNotification } = require('./functions/websocket.js');
 const { initializeDatabase, changeStatuses, dbQueue, dbTagColors } = require('./functions/database.js');
 const { processTags } = require('./functions/processTags.js');
@@ -37,8 +37,7 @@ server.on('upgrade', (request, socket, head) => {
       wss.emit('connection', ws, request);
   });
 });
-require('./functions/websocket.js')(wss); // Import WebSocket logic and pass `wss`
-
+const websocketFunctions = require('./functions/websocket.js')(wss); // Import WebSocket logic and pass `wss`
 
 initializeDatabase();
 
@@ -122,8 +121,9 @@ app.post('/queue/add', authenticateToken, (req, res) => {
     if (err) {
       return res.status(500).json({ error: 'Failed to add to queue' });
     }
+    websocketFunctions.sendFetchNotification();
     res.json({ message: 'URL added to queue', id: this.lastID });
-
+    
     // processNextFromQueue(serverStatuses.filters); // trigger queue processing
   });
 });
@@ -144,7 +144,7 @@ app.post('/queue/clear', authenticateToken, (req, res) => {
     if (err) return res.status(500).json({ error: 'Failed to clear the queue' });
     serverStatuses.playState = "pause";
     stopPlaying();
-    sendFetchNotification();
+    websocketFunctions.sendFetchNotification();
     res.json({ message: 'Queue cleared' });
   });
 });
@@ -154,7 +154,7 @@ app.post('/queue/remove', authenticateToken, (req, res) => {
   const IdToRemove = req.body.id;
   dbQueue.run(`DELETE FROM queue WHERE id=?`, [IdToRemove], (err) => {
     if (err) return res.status(500).json({ error: 'Failed to remove from the queue' });
-    sendFetchNotification();
+    websocketFunctions.sendFetchNotification();
     res.json({ message: 'Track removed from the queue' });
   });
 });
@@ -165,7 +165,7 @@ app.post('/queue/pause', (req, res) => {
     if (err) return res.status(500).json({ error: 'Failed to pause the track' });
     _currentAudio.stopIndexIncrement();
     stopPlaying();
-    sendFetchNotification();
+    websocketFunctions.sendFetchNotification();
     res.json({ message: 'Track paused' });
   });
 });
@@ -175,7 +175,7 @@ app.post('/queue/resume', (req, res) => {
   dbQueue.run(`UPDATE queue SET status = 'playing' WHERE status = 'paused'`, (err) => {
     if (err) return res.status(500).json({ error: 'Failed to resume the track' });
     play();
-    sendFetchNotification();
+    websocketFunctions.sendFetchNotification();
     res.json({ message: 'Track resumed' });
   });
 });
@@ -211,11 +211,11 @@ const currentlyPlaying = () => {
         reject(err); // Reject the promise with the error
         return;
       }
-      // NOTHING PLAYING = FETCHING NEXT PROCESSED
+      // NOTHING PLAYING
       if (!item) {
         console.log('[currentlyPlaying] Nothing with status "playing".');
         
-        resolve(null); // Resolve with null if no playing or processed songs
+        resolve(null); // Resolve with null if nothing is playing
         return;
       }
       console.log(`[currentlyPlaying] Currently playing: ${item.title}`)
@@ -229,7 +229,7 @@ const play = async () => {
   if (serverStatuses.playState == "play"){
     let currPlaying = await currentlyPlaying();
     if (currPlaying == null){
-      console.log(`[play] currently playing (null): ${currPlaying}`);
+      console.log(`[play] Nothing currently playing (${currPlaying})`);
       await processNextFromQueue(serverStatuses.filters);
     }else{
       serverStatuses.playState = "play";
@@ -267,7 +267,7 @@ const stopPlaying = async () => {
         // broadcastMessage({ event: 'track-ended', message: 0 });
         serverStatuses.playState = "pause";
         _currentAudio.stopIndexIncrement();
-        sendFetchNotification();
+        websocketFunctions.sendFetchNotification();
         resolve(true);
       });
     });
