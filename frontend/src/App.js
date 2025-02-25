@@ -253,10 +253,11 @@ const App = () => {
       const token = localStorage.getItem('token');
       await axios.post(
         'http://localhost:5000/queue/clear',
+        {}, // Empty object as body
         {
-            headers: {
-                Authorization: `Bearer ${token}`, // Add token to the Authorization header
-            },
+          headers: {
+            Authorization: `Bearer ${token}` // Headers go in the config object
+          }
         }
       );
       fetchQueue();  // Refresh queue after clearing

@@ -20,12 +20,11 @@ app.use(require('./routes/userMgmt.js'));
 // External functions
 
 const authenticateToken = require('./middleware/authenticateToken.js'); // Middleware
-const { broadcastMessage, sendFetchNotification } = require('./functions/websocket.js');
 const { initializeDatabase, changeStatuses, dbQueue, dbTagColors } = require('./functions/database.js');
 const { processTags } = require('./functions/processTags.js');
-const serverStatuses = require('./functions/serverStatuses.js');
-
-let shuffledQueue = [];
+const { serverStatuses, shiftQueue, getCurrentQueue, generateQueue } = require('./functions/serverStatuses.js');
+const { processSong } = require('./functions/audioProcessing.js');
+const { setupWebSocket, sendFetchNotification, broadcastMessage } = require('./functions/websocket.js');
 
 
 
@@ -37,8 +36,8 @@ server.on('upgrade', (request, socket, head) => {
       wss.emit('connection', ws, request);
   });
 });
-const websocketFunctions = require('./functions/websocket.js')(wss); // Import WebSocket logic and pass `wss`
 
+setupWebSocket(wss);
 initializeDatabase();
 
 // Change all statuses to 'pending' on server start
@@ -121,10 +120,13 @@ app.post('/queue/add', authenticateToken, (req, res) => {
     if (err) {
       return res.status(500).json({ error: 'Failed to add to queue' });
     }
-    websocketFunctions.sendFetchNotification();
+    sendFetchNotification();
     res.json({ message: 'URL added to queue', id: this.lastID });
     
-    // processNextFromQueue(serverStatuses.filters); // trigger queue processing
+    // Process the song (get title, duration, audio URL, etc.)
+    let item = {id: this.lastID, url: url};
+    processSong(item);
+    generateQueue();
   });
 });
 
@@ -144,8 +146,9 @@ app.post('/queue/clear', authenticateToken, (req, res) => {
     if (err) return res.status(500).json({ error: 'Failed to clear the queue' });
     serverStatuses.playState = "pause";
     stopPlaying();
-    websocketFunctions.sendFetchNotification();
+    sendFetchNotification();
     res.json({ message: 'Queue cleared' });
+    generateQueue();
   });
 });
 
@@ -154,8 +157,9 @@ app.post('/queue/remove', authenticateToken, (req, res) => {
   const IdToRemove = req.body.id;
   dbQueue.run(`DELETE FROM queue WHERE id=?`, [IdToRemove], (err) => {
     if (err) return res.status(500).json({ error: 'Failed to remove from the queue' });
-    websocketFunctions.sendFetchNotification();
+    sendFetchNotification();
     res.json({ message: 'Track removed from the queue' });
+    generateQueue();
   });
 });
 
@@ -165,7 +169,7 @@ app.post('/queue/pause', (req, res) => {
     if (err) return res.status(500).json({ error: 'Failed to pause the track' });
     _currentAudio.stopIndexIncrement();
     stopPlaying();
-    websocketFunctions.sendFetchNotification();
+    sendFetchNotification();
     res.json({ message: 'Track paused' });
   });
 });
@@ -175,7 +179,7 @@ app.post('/queue/resume', (req, res) => {
   dbQueue.run(`UPDATE queue SET status = 'playing' WHERE status = 'paused'`, (err) => {
     if (err) return res.status(500).json({ error: 'Failed to resume the track' });
     play();
-    websocketFunctions.sendFetchNotification();
+    sendFetchNotification();
     res.json({ message: 'Track resumed' });
   });
 });
@@ -226,18 +230,41 @@ const currentlyPlaying = () => {
 
 const play = async () => {
   // console.log(`[play] playState: ${serverStatuses.playState}`);
-  if (serverStatuses.playState == "play"){
-    let currPlaying = await currentlyPlaying();
-    if (currPlaying == null){
-      console.log(`[play] Nothing currently playing (${currPlaying})`);
-      await processNextFromQueue(serverStatuses.filters);
-    }else{
-      serverStatuses.playState = "play";
-      _currentAudio.duration = JSON.parse(currPlaying).duration;
-      broadcastMessage({ event: 'play', message: currPlaying });
-      _currentAudio.startIndexIncrement();
+  // try{
+    if (serverStatuses.playState == "play"){
+      let currPlaying = await currentlyPlaying();
+      if (currPlaying == null){
+        console.log(`[play] Nothing currently playing (${currPlaying})`);
+  
+        let currentQueue = getCurrentQueue();
+        if (currentQueue.length == 0){
+          console.log(`[play] Current queue is empty. Generating new queue...`);
+          currentQueue = await generateQueue();
+        }
+        if (currentQueue.length == 0){
+          console.log(`[play] Current queue is still empty.`);
+          serverStatuses.playState = "pause";
+          return;
+        }
+
+        console.log(`[play] Playing next song from shuffled queue.`);
+        let item = shiftQueue();
+        dbQueue.run(`UPDATE queue SET status = 'playing' WHERE id = ?`, [item.id]);
+        _currentAudio.duration = item.duration;
+        broadcastMessage({ event: 'play', message: item });
+        _currentAudio.startIndexIncrement();
+        
+      }else{
+        serverStatuses.playState = "play";
+        _currentAudio.duration = JSON.parse(currPlaying).duration;
+        broadcastMessage({ event: 'play', message: currPlaying });
+        _currentAudio.startIndexIncrement();
+      }
     }
-  }
+  // }catch(err){
+  //   console.error(`[play] Error: ${err}`);
+  // }
+  
 }
 
 const next = async () => {
@@ -267,7 +294,7 @@ const stopPlaying = async () => {
         // broadcastMessage({ event: 'track-ended', message: 0 });
         serverStatuses.playState = "pause";
         _currentAudio.stopIndexIncrement();
-        websocketFunctions.sendFetchNotification();
+        sendFetchNotification();
         resolve(true);
       });
     });
@@ -291,6 +318,7 @@ function formatError(err) {
 
   return message; // If no URL found, return the original message
 }
+
 
 
 server.listen(PORT, () => console.log('\x1b[2m%s\x1b[0m', `Running server on port ${PORT}`))

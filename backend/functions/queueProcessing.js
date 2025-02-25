@@ -2,7 +2,7 @@ const { dbQueue } = require('./database.js');
 
 // Fetch all pending items based on tags; returns an array of items
 const getAllPendingItems = async (tags = []) => {
-  let query = `SELECT * FROM queue WHERE status = 'pending'`;
+  let query = `SELECT * FROM queue WHERE status = 'processed'`;
   const params = [];
 
   // Add tag filtering if tags are provided
@@ -26,18 +26,28 @@ const getAllPendingItems = async (tags = []) => {
 
 // Fetch and shuffle all pending items based on tags; returns an array of items
 const getShuffledQueue = async (tags = []) => {
-  const allPendingItems = await getAllPendingItems(tags);
+  let allPendingItems = await getAllPendingItems(tags);
 
   if (allPendingItems.length === 0) {
     console.log('[getShuffledQueue] No pending items found for shuffle.');
     return null;
   }
 
-  shuffledQueue = shuffleArray(allPendingItems); // Shuffle and store
-  return shuffledQueue;
+  let shuffledQueue = shuffleArray(allPendingItems); // Shuffle and store
+  return (shuffledQueue || []);
 };
+
+const shuffleArray = (array) => {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+};
+
+
 
 module.exports = {
   getAllPendingItems,
-  getShuffledQueue,
+  getShuffledQueue
 };

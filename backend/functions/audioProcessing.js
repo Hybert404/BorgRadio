@@ -1,4 +1,6 @@
 const ytdlp        = require('yt-dlp-exec');
+const { dbQueue } = require('./database.js');
+const { sendFetchNotification } = require('./websocket.js');
 
 const getDuration = async (url) => {
   try {
@@ -25,6 +27,7 @@ const getDuration = async (url) => {
   }
 }
 
+
 // Function to get the best audio stream URL using yt-dlp
 const getAudioUrlAndTitle = async (url) => {
   try {
@@ -47,6 +50,55 @@ const getAudioUrlAndTitle = async (url) => {
   }
 };
 
+// Update the status of an item in the queue
+const updateItemStatus = async (id, status) => {
+  return new Promise((resolve, reject) => {
+    dbQueue.run(`UPDATE queue SET status = ? WHERE id = ?`, [status, id], (err) => {
+      if (err) {
+        console.error(`[updateItemStatus] Error updating status to ${status}:`, err);
+        reject(err);
+      } else {
+        resolve();
+      }
+    });
+  });
+};
+
+// Process a song (title, duration, audio URL) and update the database
+const processSong = async (item) => {
+  try {
+    // Mark the item as processing
+    await updateItemStatus(item.id, 'processing');
+    sendFetchNotification();
+
+    // Fetch and process the audio URL and title
+    const { title, audioUrl } = await getAudioUrlAndTitle(item.url);
+    const duration = await getDuration(audioUrl);
+
+    // Update the database with the processed item
+    dbQueue.run(
+      `UPDATE queue SET status = 'processed', audioUrl = ?, title = ?, duration = ? WHERE id = ?`,
+      [audioUrl, title, duration, item.id],
+      (err) => {
+        if (err) {
+          console.error('[processSong] Error updating processed item:', err);
+        } else {
+          // console.log(`[processSong] Successfully processed item: ${title}`);
+          sendFetchNotification();
+        }
+      }
+    );
+  } catch (error) {
+    console.error('[processSong] Error:', error.message);
+  }
+};
+
+module.exports = {processSong};
+
+//-----------------------------------------------------------------------------------
+
+
+
 
 // Get new audioUrl for row with certain id
 const reprocessRowById = async (id) => {
@@ -64,7 +116,7 @@ const reprocessRowById = async (id) => {
     const { title, audioUrl } = await getAudioUrlAndTitle(urlToReprocess);
 
     // Update the database with the processed status and audio URL
-    db.run(`UPDATE queue SET status = 'processed', audioUrl = ?, title = ?  WHERE id = ?`, [audioUrl, title, id]);
+    dbQueue.run(`UPDATE queue SET status = 'processed', audioUrl = ?, title = ?  WHERE id = ?`, [audioUrl, title, id]);
     sendFetchNotification();
 
     return true; // Resolves with true
@@ -74,25 +126,25 @@ const reprocessRowById = async (id) => {
   }
 };
 
-// Find url with given id of the row
+// Get the row by id
 const getById = (id) => {
-    return new Promise((resolve, reject) => {
-      dbQueue.get(`SELECT * FROM queue WHERE id = ? ORDER BY id LIMIT 1`, [id], (err, item) => {
-        if (err) {
-          console.error('[getUrlById] Error accessing db: ', err);
-          reject(err); // Reject the promise with the error
-          return;
-        }
-        if (!item) {
-          console.error(`[getUrlById] No data with id =${id}: `, err);
-          reject(null); // Resolve with null
-          return;
-        }
-        console.log(`[getUrlById] Found row with id=${id}`)
-        resolve(item); // Resolve with URL
-      });
+  return new Promise((resolve, reject) => {
+    dbQueue.get(`SELECT * FROM queue WHERE id = ? ORDER BY id LIMIT 1`, [id], (err, item) => {
+      if (err) {
+        console.error('[getById] Error accessing db: ', err);
+        reject(err); // Reject the promise with the error
+        return;
+      }
+      if (!item) {
+        console.error(`[getById] No data with id =${id}: `, err);
+        reject(null); // Resolve with null
+        return;
+      }
+      console.log(`[getById] Found row with id=${id}`)
+      resolve(item); // Resolve with item
     });
-  };
+  });
+};
 
 
 
@@ -227,49 +279,9 @@ const getNextItem = async (tags = []) => {
   });
 };
 
-// Helper function to process and play a song
-const playSong = async (item) => {
-  try {
-    // Mark the item as processing
-    await updateItemStatus(item.id, 'processing');
-    sendFetchNotification();
 
-    // Fetch and process the audio URL and title
-    const { title, audioUrl } = await getAudioUrlAndTitle(item.url);
-    const duration = await getDuration(audioUrl);
 
-    // Update the database with the processed item
-    db.run(
-      `UPDATE queue SET status = 'processed', audioUrl = ?, title = ?, duration = ? WHERE id = ?`,
-      [audioUrl, title, duration, item.id],
-      (err) => {
-        if (err) {
-          console.error('[playSong] Error updating processed item:', err);
-        } else {
-          console.log(`[playSong] Successfully processed item: ${title}`);
-          sendFetchNotification();
-          play();
-        }
-      }
-    );
-  } catch (error) {
-    console.error('[playSong] Error:', error.message);
-  }
-};
 
-// Helper function to update item status
-const updateItemStatus = async (id, status) => {
-  return new Promise((resolve, reject) => {
-    db.run(`UPDATE queue SET status = ? WHERE id = ?`, [status, id], (err) => {
-      if (err) {
-        console.error(`[updateItemStatus] Error updating status to ${status}:`, err);
-        reject(err);
-      } else {
-        resolve();
-      }
-    });
-  });
-};
 
 
 
@@ -277,20 +289,20 @@ const updateItemStatus = async (id, status) => {
 
 // ?????
 // Fetching next processed entry and marking it as playing
-db.get(`SELECT * FROM queue WHERE status = 'processed' ORDER BY id LIMIT 1`, (err, item) => {
-  if (err) {
-    console.error('[currentlyPlaying] Error accessing queue:', err);
-    reject(err); // Reject the promise with the error
-    return;
-  }
-  // NOTHING PROCESSED = RETURN NULL
-  if (!item) {
-    console.log('[currentlyPlaying] No processed songs.');
-    resolve(null);
-    return;
-  }
-  db.run(`UPDATE queue SET status = 'playing' WHERE id = ?`, [item.id]);
-  play();
-  sendFetchNotification();
-  resolve(JSON.stringify(item));
-});
+// db.get(`SELECT * FROM queue WHERE status = 'processed' ORDER BY id LIMIT 1`, (err, item) => {
+//   if (err) {
+//     console.error('[currentlyPlaying] Error accessing queue:', err);
+//     reject(err); // Reject the promise with the error
+//     return;
+//   }
+//   // NOTHING PROCESSED = RETURN NULL
+//   if (!item) {
+//     console.log('[currentlyPlaying] No processed songs.');
+//     resolve(null);
+//     return;
+//   }
+//   db.run(`UPDATE queue SET status = 'playing' WHERE id = ?`, [item.id]);
+//   play();
+//   sendFetchNotification();
+//   resolve(JSON.stringify(item));
+// });
