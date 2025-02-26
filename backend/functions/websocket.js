@@ -1,7 +1,7 @@
 const WebSocket = require('ws');
 
 const activeConnections = new Set();
-const { serverStatuses } = require('./serverStatuses.js');
+const { getServerStatuses, setServerStatus } = require('./serverStatuses.js');
 
 // Send a message to all WebSocket clients
 const broadcastMessage = (message) => {
@@ -21,6 +21,7 @@ const sendFetchNotification = () => {
 // WebSocket setup function
 const setupWebSocket = (wss) => {
     wss.on('connection', (ws) => {
+        let serverStatuses = getServerStatuses();
         console.log('\x1b[32m%s\x1b[0m', 'Client connected');
         activeConnections.add(ws);
     
@@ -33,7 +34,10 @@ const setupWebSocket = (wss) => {
     
             switch (data.type) {
                 case 'statusUpdate':
-                    Object.assign(serverStatuses, data.status);
+                    // Object.assign(serverStatuses, data.status);
+                    Object.entries(data.status).forEach(([property, value]) => {
+                        setServerStatus(property, value);
+                    });
                     broadcastMessage({ event: 'statusUpdate', message: serverStatuses });
                     break;
     

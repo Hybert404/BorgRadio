@@ -222,20 +222,7 @@ const getLastQueueStatus = async () => {
   });
 };
 
-// Helper function to reset finished items to pending
-const resetFinishedToPending = async () => {
-  return new Promise((resolve, reject) => {
-    db.run(`UPDATE queue SET status = 'pending' WHERE status = 'finished'`, (err) => {
-      if (err) {
-        console.error('[resetFinishedToPending] Error updating status:', err);
-        reject(err);
-      } else {
-        console.log('[resetFinishedToPending] Status updated to pending for all finished songs.');
-        resolve();
-      }
-    });
-  });
-};
+
 
 // Helper function to shuffle an array
 const shuffleArray = (array) => {

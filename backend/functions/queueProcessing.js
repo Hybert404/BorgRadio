@@ -1,8 +1,9 @@
 const { dbQueue } = require('./database.js');
+const { sendFetchNotification } = require('./websocket.js');
 
 // Fetch all pending items based on tags; returns an array of items
 const getAllPendingItems = async (tags = []) => {
-  let query = `SELECT * FROM queue WHERE status = 'processed'`;
+  let query = `SELECT * FROM queue WHERE IN ('processed', 'pending')`;
   const params = [];
 
   // Add tag filtering if tags are provided
@@ -29,8 +30,13 @@ const getShuffledQueue = async (tags = []) => {
   let allPendingItems = await getAllPendingItems(tags);
 
   if (allPendingItems.length === 0) {
-    console.log('[getShuffledQueue] No pending items found for shuffle.');
-    return null;
+    console.log('[getShuffledQueue] No pending items found for shuffle. Trying to reset finished items...');
+    await resetFinishedToPending();
+    allPendingItems = await getAllPendingItems(tags);
+    if (allPendingItems.length === 0) {
+      console.log('[getShuffledQueue] Still no pending items. Cant generate queue.');
+    }
+    return [];
   }
 
   let shuffledQueue = shuffleArray(allPendingItems); // Shuffle and store
@@ -43,6 +49,22 @@ const shuffleArray = (array) => {
     [array[i], array[j]] = [array[j], array[i]];
   }
   return array;
+};
+
+// Set finished items to pending
+const resetFinishedToPending = async () => {
+  return new Promise((resolve, reject) => {
+    dbQueue.run(`UPDATE queue SET status = 'pending' WHERE status = 'finished'`, (err) => {
+      if (err) {
+        console.error('[resetFinishedToPending] Error updating status:', err);
+        reject(err);
+      } else {
+        console.log('[resetFinishedToPending] Status updated to pending for all finished songs.');
+        sendFetchNotification();
+        resolve();
+      }
+    });
+  });
 };
 
 

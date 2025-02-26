@@ -1,3 +1,4 @@
+const { getShuffledQueue, getAllPendingItems } = require('./queueProcessing.js');
 
 let serverStatuses = {
     loopQueue: true,
@@ -7,6 +8,33 @@ let serverStatuses = {
   };
 
 let currentQueue = [];
+
+const getServerStatuses = () => {
+  return serverStatuses;
+};
+
+const setServerStatus = async (property, value) => {
+  if (property in serverStatuses) {
+      serverStatuses[property] = value;
+      switch (property) {
+        case 'randomizeQueue':
+          console.log(`[statusesProxy] RandomizeQueue changed to: ${value}`);
+          await generateQueue();
+          break;
+        case 'filters':
+          console.log(`[statusesProxy] Filters changed to: ${value}`);
+          await generateQueue();
+          break;
+        default:
+          console.log(`[statusesProxy] ${property} changed to: ${value}`);
+          break;
+      }
+      // console.log(`[setServerStatus] ${property} changed to: ${value}`);
+      return true;
+  }
+  console.error(`[setServerStatus] Invalid property: ${property}`);
+  return false;
+};
 
 // Add these getter/setter methods
 const getCurrentQueue = () => currentQueue;
@@ -65,6 +93,8 @@ const generateQueue = async () => {
 
 module.exports = {
   serverStatuses: statusesProxy,
+  getServerStatuses,
+  setServerStatus,
   getCurrentQueue,
   shiftQueue,
   setCurrentQueue,

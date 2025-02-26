@@ -22,7 +22,7 @@ app.use(require('./routes/userMgmt.js'));
 const authenticateToken = require('./middleware/authenticateToken.js'); // Middleware
 const { initializeDatabase, changeStatuses, dbQueue, dbTagColors } = require('./functions/database.js');
 const { processTags } = require('./functions/processTags.js');
-const { serverStatuses, shiftQueue, getCurrentQueue, generateQueue } = require('./functions/serverStatuses.js');
+const { serverStatuses, shiftQueue, getCurrentQueue, generateQueue, setServerStatus } = require('./functions/serverStatuses.js');
 const { processSong } = require('./functions/audioProcessing.js');
 const { setupWebSocket, sendFetchNotification, broadcastMessage } = require('./functions/websocket.js');
 
@@ -144,7 +144,7 @@ app.post('/queue/skip', async (req, res) => {
 app.post('/queue/clear', authenticateToken, (req, res) => {
   dbQueue.run(`DELETE FROM queue`, (err) => {
     if (err) return res.status(500).json({ error: 'Failed to clear the queue' });
-    serverStatuses.playState = "pause";
+    setServerStatus('playState', "pause")
     stopPlaying();
     sendFetchNotification();
     res.json({ message: 'Queue cleared' });
@@ -231,7 +231,7 @@ const currentlyPlaying = () => {
 const play = async () => {
   // console.log(`[play] playState: ${serverStatuses.playState}`);
   // try{
-    if (serverStatuses.playState == "play"){
+    if (serverStatuses.playState === "play"){
       let currPlaying = await currentlyPlaying();
       if (currPlaying == null){
         console.log(`[play] Nothing currently playing (${currPlaying})`);
@@ -243,7 +243,7 @@ const play = async () => {
         }
         if (currentQueue.length == 0){
           console.log(`[play] Current queue is still empty.`);
-          serverStatuses.playState = "pause";
+          setServerStatus('playState', "pause");
           return;
         }
 
@@ -255,7 +255,7 @@ const play = async () => {
         _currentAudio.startIndexIncrement();
         
       }else{
-        serverStatuses.playState = "play";
+        setServerStatus('playState', "play");
         _currentAudio.duration = JSON.parse(currPlaying).duration;
         broadcastMessage({ event: 'play', message: currPlaying });
         _currentAudio.startIndexIncrement();
@@ -269,7 +269,7 @@ const play = async () => {
 
 const next = async () => {
   await stopPlaying();
-  serverStatuses.playState = "play";
+  setServerStatus('playState', "play");
   play();
 }
 
@@ -292,7 +292,7 @@ const stopPlaying = async () => {
         dbQueue.run(`UPDATE queue SET status = 'finished' WHERE id = ?`, [item.id]);
         console.log(`[stopPlaying] Finished item with id=${item.id}`);
         // broadcastMessage({ event: 'track-ended', message: 0 });
-        serverStatuses.playState = "pause";
+        setServerStatus('playState', "pause");
         _currentAudio.stopIndexIncrement();
         sendFetchNotification();
         resolve(true);
