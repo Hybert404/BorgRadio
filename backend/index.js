@@ -4,6 +4,7 @@ const http          = require('http');
 const WebSocket     = require('ws');
 const router        = express.Router();
 
+const PORT          = process.env.PORT || 5000
 const app           = express();
 const server        = http.createServer(app);
 const wss           = new WebSocket.Server({ noServer: true });
@@ -27,18 +28,10 @@ const { processSong } = require('./functions/audioProcessing.js');
 const { setupWebSocket, broadcastMessage } = require('./functions/websocket.js');
 const eventBus = require('./functions/eventBus');
 
-
-eventBus.on('fetch', () => {
-  // Broadcast to all clients that they should fetch new data
-  broadcastMessage({ event: 'fetch', message: JSON.stringify('Refreshing...') });
-});
-
 const sendFetchNotification = () => {
   eventBus.emit('fetch');
 };
 
-
-const PORT         = process.env.PORT || 5000
 
 // Handle WebSocket upgrade
 server.on('upgrade', (request, socket, head) => {
@@ -259,6 +252,14 @@ const play = async () => {
 
         console.log(`[play] Playing next song from shuffled queue.`);
         let item = shiftQueue();
+
+        // URL validation before playing
+        const isValid = await validateAudioUrl(item);
+        if (!isValid) {
+            console.log(`[play] Refreshing expired audio URL for item ${item.id}`);
+            await processSong(item);
+        }
+
         dbQueue.run(`UPDATE queue SET status = 'playing' WHERE id = ?`, [item.id]);
         _currentAudio.duration = item.duration;
         broadcastMessage({ event: 'play', message: item });
@@ -311,8 +312,25 @@ const stopPlaying = async () => {
   });
 }
 
+// Audio URL validation
+const validateAudioUrl = async (item) => {
+  try {
+    if (!item.audioUrl) {
+      console.log(`[validateAudioUrl] No audioUrl for item ${item.id}, refreshing...`);
+      return false;
+    }
 
-
+    const response = await fetch(item.audioUrl, { method: 'HEAD' });
+    if (!response.ok) {
+      console.log(`[validateAudioUrl] Invalid audioUrl for item ${item.id}, refreshing...`);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.log(`[validateAudioUrl] Error checking audioUrl: ${error.message}`);
+    return false;
+  }
+};
 
 // shorten links from error messages
 function formatError(err) {

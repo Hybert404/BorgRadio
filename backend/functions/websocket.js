@@ -3,6 +3,8 @@ const eventBus = require('./eventBus');
 const EVENTS = require('../constants/events');
 
 const activeConnections = new Set();
+let fetchDebounceTimer = null;
+const DEBOUNCE_DELAY = 20;
 
 // Send a message to all WebSocket clients
 const broadcastMessage = (message) => {
@@ -13,6 +15,19 @@ const broadcastMessage = (message) => {
         }
     });
 };
+
+// Listen for fetch events
+eventBus.on('fetch', () => {
+    if (fetchDebounceTimer) clearTimeout(fetchDebounceTimer);
+    
+    fetchDebounceTimer = setTimeout(() => {
+        broadcastMessage({ 
+            event: 'fetch', 
+            message: JSON.stringify('Refreshing...'),
+        });
+        fetchDebounceTimer = null;
+    }, DEBOUNCE_DELAY);
+});
 
 // WebSocket setup function
 const setupWebSocket = (wss) => {

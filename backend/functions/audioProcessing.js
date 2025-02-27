@@ -1,6 +1,11 @@
 const ytdlp        = require('yt-dlp-exec');
 const { dbQueue } = require('./database.js');
-const { sendFetchNotification } = require('./websocket.js');
+const eventBus = require('./eventBus');
+const { broadcastMessage } = require('./websocket.js');
+
+const sendFetchNotification = () => {
+  eventBus.emit('fetch');
+};
 
 const getDuration = async (url) => {
   try {
