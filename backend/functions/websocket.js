@@ -4,7 +4,7 @@ const EVENTS = require('../constants/events');
 
 const activeConnections = new Set();
 let fetchDebounceTimer = null;
-const DEBOUNCE_DELAY = 20;
+const DEBOUNCE_DELAY = 0;
 
 // Send a message to all WebSocket clients
 const broadcastMessage = (message) => {

@@ -167,24 +167,29 @@ app.post('/queue/remove', authenticateToken, (req, res) => {
 });
 
 // Pause track
-app.post('/queue/pause', (req, res) => {
-  dbQueue.run(`UPDATE queue SET status = 'paused' WHERE status = 'playing'`, (err) => {
+app.post('/queue/pause', async (req, res) => {
+  await dbQueue.run(`UPDATE queue SET status = 'paused' WHERE status = 'playing'`, (err) => {
     if (err) return res.status(500).json({ error: 'Failed to pause the track' });
-    _currentAudio.stopIndexIncrement();
-    stopPlaying();
-    sendFetchNotification();
-    res.json({ message: 'Track paused' });
   });
+
+  _currentAudio.stopIndexIncrement();
+  await stopPlaying();
+  sendFetchNotification();
+  res.json({ message: 'Track paused' });
 });
 
 // Resume track
-app.post('/queue/resume', (req, res) => {
+app.post('/queue/resume', async (req, res) => {
   dbQueue.run(`UPDATE queue SET status = 'playing' WHERE status = 'paused'`, (err) => {
     if (err) return res.status(500).json({ error: 'Failed to resume the track' });
-    play();
-    sendFetchNotification();
-    res.json({ message: 'Track resumed' });
   });
+
+  console.log(`[resume] Resuming track`);
+  await play(_currentAudio.index);
+  console.log(`[resume] after Play`);
+  sendFetchNotification();
+  console.log(`[resume] after sendFetchNotification`);
+  res.json({ message: 'Track resumed' });
 });
 
 // Get all available tags
@@ -231,57 +236,55 @@ const currentlyPlaying = () => {
   });
 };
 
-const play = async () => {
-  // console.log(`[play] playState: ${serverStatuses.playState}`);
-  // try{
-    if (serverStatuses.playState === "play"){
-      let currPlaying = await currentlyPlaying();
-      if (currPlaying == null){
-        console.log(`[play] Nothing currently playing (${currPlaying})`);
-  
-        let currentQueue = getCurrentQueue();
-        if (currentQueue.length == 0){
-          console.log(`[play] Current queue is empty. Generating new queue...`);
-          currentQueue = await generateQueue();
-        }
-        if (currentQueue.length == 0){
-          console.log(`[play] Current queue is still empty.`);
-          setServerStatus('playState', "pause");
-          return;
-        }
+const play = async (timestamp = 0) => {
+  if (serverStatuses.playState === "play"){
+    let currPlaying = await currentlyPlaying();
+    if (currPlaying == null){
+      console.log(`[play] Nothing currently playing (${currPlaying})`);
 
-        console.log(`[play] Playing next song from shuffled queue.`);
-        let item = shiftQueue();
-
-        // URL validation before playing
-        const isValid = await validateAudioUrl(item);
-        if (!isValid) {
-            console.log(`[play] Refreshing expired audio URL for item ${item.id}`);
-            await processSong(item);
-        }
-
-        dbQueue.run(`UPDATE queue SET status = 'playing' WHERE id = ?`, [item.id]);
-        _currentAudio.duration = item.duration;
-        broadcastMessage({ event: 'play', message: item });
-        _currentAudio.startIndexIncrement();
-        
-      }else{
-        // setServerStatus('playState', "play");
-        _currentAudio.duration = JSON.parse(currPlaying).duration;
-        broadcastMessage({ event: 'play', message: currPlaying });
-        _currentAudio.startIndexIncrement();
+      let currentQueue = getCurrentQueue();
+      if (currentQueue.length == 0){
+        console.log(`[play] Current queue is empty. Generating new queue...`);
+        currentQueue = await generateQueue();
       }
+      if (currentQueue.length == 0){
+        console.log(`[play] Current queue is still empty.`);
+        setServerStatus('playState', "pause");
+        return;
+      }
+
+      console.log(`[play] Playing next song from shuffled queue.`);
+      let item = shiftQueue();
+
+      // URL validation before playing
+      const isValid = await validateAudioUrl(item);
+      if (!isValid) {
+          console.log(`[play] Refreshing expired audio URL for item ${item.id}`);
+          await processSong(item);
+      }
+
+      await dbQueue.run(`UPDATE queue SET status = 'playing' WHERE id = ?`, [item.id]);
+      _currentAudio.duration = item.duration;
+      _currentAudio.index = timestamp;
+      broadcastMessage({ event: 'play', message: { ...item, startTime: timestamp } });
+      _currentAudio.startIndexIncrement();
+      
+    }else{
+      const playingItem = JSON.parse(currPlaying);
+      _currentAudio.duration = playingItem.duration;
+      _currentAudio.index = timestamp;
+      broadcastMessage({ event: 'play', message: { ...playingItem, startTime: timestamp } });
+      _currentAudio.startIndexIncrement();
     }
-  // }catch(err){
-  //   console.error(`[play] Error: ${err}`);
-  // }
-  
+    console.log(`[play] Playing at timestamp: ${timestamp}`);
+  }
 }
 
 const next = async () => {
   await stopPlaying();
+  _currentAudio.resetIndexIncrement(); // Reset the timer and index
+  _currentAudio.index = 0; // Explicitly set index to 0
   setServerStatus('playState', "play");
-  play();
 }
 
 const stopPlaying = async () => {
@@ -304,7 +307,7 @@ const stopPlaying = async () => {
         console.log(`[stopPlaying] Finished item with id=${item.id}`);
         // broadcastMessage({ event: 'track-ended', message: 0 });
         setServerStatus('playState', "pause");
-        _currentAudio.stopIndexIncrement();
+        _currentAudio.resetIndexIncrement();
         sendFetchNotification();
         resolve(true);
       });

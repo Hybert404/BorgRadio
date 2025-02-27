@@ -290,13 +290,25 @@ const App = () => {
     ws.current.onmessage = (event) => {
       let data;
       try {
-        data = JSON.parse(event.data);  // Parse incoming message
-        console.log(`[WS] Event: ${data.event}, Message: ${data.message}`);
+        data = JSON.parse(event.data);
+        let logMessage = `[WS] Event: ${data.event}`;
+        
+        // Handle object messages
+        if (typeof data.message === 'object' && data.message !== null) {
+          logMessage += '\nMessage:';
+          Object.entries(data.message).forEach(([key, value]) => {
+            logMessage += `\n  ${key}: ${JSON.stringify(value)}`;
+          });
+        } else {
+          logMessage += `, Message: ${data.message}`;
+        }
+        
+        console.log(logMessage);
       } catch (e) {
         console.error('Failed to parse event data:', event.data);
-        return;  // Exit if data is invalid
+        return;
       }
-  
+    
       let msg;
       try {
         msg = typeof data.message === 'string' ? JSON.parse(data.message) : data.message;
@@ -304,7 +316,7 @@ const App = () => {
         console.error('Invalid JSON in message:', data.message);
         msg = null;
       }
-  
+    
       switch (data.event) {
         case 'track-ended':
           console.log('The track has ended. Ready for the next track.');
@@ -324,11 +336,26 @@ const App = () => {
   
         case 'play':
           if (audioRef.current) {
+            // First pause current playback
             audioRef.current.pause();
             if (audioRef.current.intervalId) {
               clearInterval(audioRef.current.intervalId);
             }
-  
+        
+            // Create the loadeddata handler
+            const handleLoadedData = () => {
+              if (msg.startTime) {
+                audioRef.current.currentTime = msg.startTime;
+              }
+              audioRef.current.play().catch((err) => {
+                console.error("Error playing audio:", err);
+              });
+            };
+        
+            // Add event listener before changing source
+            audioRef.current.addEventListener('loadeddata', handleLoadedData, { once: true });
+        
+            // Update states after setting up listener
             setAudioSrc(msg.audioUrl);
             setCurrentSong({
               id: msg.id,
@@ -336,26 +363,21 @@ const App = () => {
               title: msg.title,
               audiourl: msg.audioUrl,
               duration: msg.duration,
-              currentTime: 0,
+              currentTime: msg.startTime || 0,
             });
-  
-            const handleLoadedData = () => {
-              audioRef.current.play().catch((err) => {
-                console.error("Error playing audio:", err);
-              });
-            };
-  
-            audioRef.current.addEventListener('loadeddata', handleLoadedData);
-  
-            audioRef.current.onended = () => {
-              clearInterval(audioRef.current.intervalId);
-              audioRef.current.removeEventListener('loadeddata', handleLoadedData);
-            };
-  
+        
+            // Load the new audio
             audioRef.current.load();
+        
+            // Cleanup on track end
+            audioRef.current.onended = () => {
+              if (audioRef.current.intervalId) {
+                clearInterval(audioRef.current.intervalId);
+              }
+            };
           }
           break;
-
+  
           case 'statusUpdate':
             setStatuses(data.message); // Update all statuses
             break;
@@ -433,6 +455,11 @@ const App = () => {
       }
     }else if (statuses.playState === 'pause'){
       try {
+        // Pause the HTML audio player
+        if (audioRef.current) {
+          audioRef.current.pause();
+        }
+
         async function pause(){
           try{
             await axios.post('http://localhost:5000/queue/pause');
@@ -462,7 +489,7 @@ const App = () => {
       }
     };
 
-  }, [statuses]);
+  }, [statuses.playState]);
 
   const handleDelete = async (id) => {
     setQueue((prevQueue) => prevQueue.filter(item => item.id !== id));
@@ -560,6 +587,11 @@ const App = () => {
 
   const statusKeys = Object.keys(statuses).filter((key) => key !== 'playState' && key !== 'filters'); // Exclude button from checkbox loop
 
+  const statusDisplayNames = {
+    randomizeQueue: 'Randomize',
+    loopQueue: 'Loop',
+  };
+
   return (
     <Box sx={{ display: 'flex', gap: 4, alignItems: 'top', p:4}}>
       <Snackbar
@@ -644,7 +676,17 @@ const App = () => {
             <Button variant='contained' color='error' onClick={clearQueue} startIcon={<DeleteIcon />}>Clear Queue</Button>
             <Button variant='contained' color='primary' onClick={pasteTest} startIcon={<InsertLinkIcon />}>Paste test link</Button>
             {statusKeys.map((key) => (
-              <FormControlLabel key={key} control={<Checkbox checked={statuses[key]} onChange={handleCheckboxChange} name={key} />} label={key} />
+              <FormControlLabel 
+                key={key} 
+                control={
+                  <Checkbox 
+                    checked={statuses[key]} 
+                    onChange={handleCheckboxChange} 
+                    name={key} 
+                  />
+                } 
+                label={statusDisplayNames[key] || key}
+              />
             ))}
           </Box>
           {/* <Button variant='contained' color='primary' onClick={skipQueue} startIcon={<SkipNextIcon />}>Skip</Button> */}
