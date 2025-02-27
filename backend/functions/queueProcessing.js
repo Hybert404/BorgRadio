@@ -2,14 +2,14 @@ const { dbQueue } = require('./database.js');
 const eventBus = require('./eventBus');
 const EVENTS = require('../constants/events.js');
 
-let serverStatuses = {
-  loopQueue: true  // Default value
-};
+// let serverStatuses = {
+//   loopQueue: true  // Default value
+// };
 
 // Listen for status updates
-eventBus.on(EVENTS.STATUS_UPDATE, (statuses) => {
-  serverStatuses = statuses;
-});
+// eventBus.on(EVENTS.STATUS_UPDATE, (statuses) => {
+//   serverStatuses = statuses;
+// });
 
 const fetchQueueItems = async (query, params) => {
   return new Promise((resolve, reject) => {
@@ -37,8 +37,8 @@ const getAllPendingItems = async (tags = []) => {
 
   let items = await fetchQueueItems(query, params);
   
-  // If no items found and loopQueue is enabled, reset finished items and try again
-  if (items.length === 0 && serverStatuses.loopQueue) {
+  // If no items found, reset finished items and try again
+  if (items.length === 0) {
     console.log('[getAllPendingItems] No pending items found. Resetting finished items...');
     await resetFinishedToPending();
     items = await fetchQueueItems(query, params);

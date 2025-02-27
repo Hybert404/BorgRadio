@@ -2,7 +2,7 @@ const { getShuffledQueue, getAllPendingItems } = require('./queueProcessing.js')
 const eventBus = require('./eventBus');
 
 let serverStatuses = {
-    loopQueue: true,
+    // loopQueue: true,
     randomizeQueue: false,
     playState: false,
     filters: [],

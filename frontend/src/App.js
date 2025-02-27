@@ -128,7 +128,7 @@ const App = () => {
   const [audioSrc, setAudioSrc] = useState(''); // State to manage the audio source
   const audioRef = useRef(null); // Reference to the audio player
   const [statuses, setStatuses] = useState({
-    loopQueue: false,
+    // loopQueue: false,
     randomizeQueue: false,
     playState: 'pause',
     filters: []  // Initialize empty Set
