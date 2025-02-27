@@ -317,7 +317,7 @@ const App = () => {
           }
           break;
   
-        case 'refresh':
+        case 'fetch':
           fetchQueue();
           fetchTags();
           break;

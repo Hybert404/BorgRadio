@@ -24,8 +24,18 @@ const { initializeDatabase, changeStatuses, dbQueue, dbTagColors } = require('./
 const { processTags } = require('./functions/processTags.js');
 const { serverStatuses, shiftQueue, getCurrentQueue, generateQueue, setServerStatus } = require('./functions/serverStatuses.js');
 const { processSong } = require('./functions/audioProcessing.js');
-const { setupWebSocket, sendFetchNotification, broadcastMessage } = require('./functions/websocket.js');
+const { setupWebSocket, broadcastMessage } = require('./functions/websocket.js');
+const eventBus = require('./functions/eventBus');
 
+
+eventBus.on('fetch', () => {
+  // Broadcast to all clients that they should fetch new data
+  broadcastMessage({ event: 'fetch', message: JSON.stringify('Refreshing...') });
+});
+
+const sendFetchNotification = () => {
+  eventBus.emit('fetch');
+};
 
 
 const PORT         = process.env.PORT || 5000
@@ -255,7 +265,7 @@ const play = async () => {
         _currentAudio.startIndexIncrement();
         
       }else{
-        setServerStatus('playState', "play");
+        // setServerStatus('playState', "play");
         _currentAudio.duration = JSON.parse(currPlaying).duration;
         broadcastMessage({ event: 'play', message: currPlaying });
         _currentAudio.startIndexIncrement();

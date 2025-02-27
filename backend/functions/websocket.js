@@ -1,7 +1,8 @@
 const WebSocket = require('ws');
+const eventBus = require('./eventBus');
+const EVENTS = require('../constants/events');
 
 const activeConnections = new Set();
-const { getServerStatuses, setServerStatus } = require('./serverStatuses.js');
 
 // Send a message to all WebSocket clients
 const broadcastMessage = (message) => {
@@ -13,40 +14,37 @@ const broadcastMessage = (message) => {
     });
 };
 
-// Notify all active WebSocket clients to fetch queue
-const sendFetchNotification = () => {
-    broadcastMessage({ event: 'refresh', message: JSON.stringify('Refreshing...') });
-};
-
 // WebSocket setup function
 const setupWebSocket = (wss) => {
+    // Listen for status updates
+    eventBus.on(EVENTS.STATUS_UPDATE, (statuses) => {
+        broadcastMessage({ event: EVENTS.STATUS_UPDATE, message: statuses });
+    });
+
     wss.on('connection', (ws) => {
-        let serverStatuses = getServerStatuses();
         console.log('\x1b[32m%s\x1b[0m', 'Client connected');
         activeConnections.add(ws);
-    
-        ws.send(JSON.stringify({ event: 'statusUpdate', message: serverStatuses }));
+        
+        // Get initial status through a require here to avoid circular dependency
+        const { getServerStatuses } = require('./serverStatuses');
+        ws.send(JSON.stringify({
+            event: EVENTS.STATUS_UPDATE,
+            message: getServerStatuses()
+        }));
     
         ws.on('message', (message) => {
             const messageString = Buffer.from(message).toString();
             console.log("\x1b[32m%s\x1b[0m", 'Received:', messageString);
             const data = JSON.parse(messageString);
     
-            switch (data.type) {
-                case 'statusUpdate':
-                    // Object.assign(serverStatuses, data.status);
-                    Object.entries(data.status).forEach(([property, value]) => {
-                        setServerStatus(property, value);
-                    });
-                    broadcastMessage({ event: 'statusUpdate', message: serverStatuses });
-                    break;
-    
-                default:
-                    console.log('Unhandled data type:', data.type);
-                    break;
+            if (data.type === EVENTS.STATUS_UPDATE) {
+                const { setServerStatus } = require('./serverStatuses');
+                Object.entries(data.status).forEach(([property, value]) => {
+                    setServerStatus(property, value);
+                });
             }
         });
-    
+
         ws.on('close', () => {
             console.log('\x1b[35m%s\x1b[0m', 'Client disconnected');
             activeConnections.delete(ws);
@@ -54,8 +52,8 @@ const setupWebSocket = (wss) => {
     });
 };
 
+
 module.exports = {
     setupWebSocket,
-    broadcastMessage,
-    sendFetchNotification
+    broadcastMessage
 };
