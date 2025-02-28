@@ -48,6 +48,8 @@ import UpdateIcon from '@mui/icons-material/Update';
 import VolumeDown from '@mui/icons-material/VolumeDown';
 import VolumeUp from '@mui/icons-material/VolumeUp';
 
+import { MuiColorInput } from 'mui-color-input';
+
 // Fonts
 import '@fontsource/roboto';
 
@@ -114,6 +116,151 @@ const LoginPopup = ({ onClose, onLogin }) => {
               {error && <p style={{ color: 'red' }}>{error}</p>}
           </Box>
       </Box>
+  );
+};
+
+const TagColorChanger = ({ tagColors, onColorChange }) => {
+  const [selectedTag, setSelectedTag] = useState(null);
+  const [selectedColor, setSelectedColor] = useState('');
+  const [newTagName, setNewTagName] = useState('');
+
+  const handleTagSelect = (tag) => {
+    setSelectedTag(tag);
+    setSelectedColor(tagColors[tag]);
+  };
+
+  const handleColorChange = (color) => {
+    setSelectedColor(color);
+  };
+
+  const handleSave = async () => {
+    if (selectedTag && selectedColor) {
+      try {
+        const token = localStorage.getItem('token');
+        await axios.post('http://localhost:5000/queue/tags/color', 
+          { 
+            tag: selectedTag, 
+            color: selectedColor 
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${token}`
+            }
+          }
+        );
+        onColorChange();
+      } catch (error) {
+        console.error('Error updating tag color:', error);
+      }
+    }
+  };
+
+  const handleAddTag = async () => {
+    if (newTagName.trim()) {
+      try {
+        const token = localStorage.getItem('token');
+        await axios.post('http://localhost:5000/queue/tags/add',
+          {
+            tag: newTagName.trim().toLowerCase(),
+            color: '#CCCCCC' // Default color
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${token}`
+            }
+          }
+        );
+        setNewTagName('');
+        onColorChange();
+      } catch (error) {
+        console.error('Error adding tag:', error);
+      }
+    }
+  };
+
+  const handleRemoveTag = async (tagToRemove) => {
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post('http://localhost:5000/queue/tags/remove',
+        {
+          tag: tagToRemove
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
+      if (selectedTag === tagToRemove) {
+        setSelectedTag(null);
+        setSelectedColor('');
+      }
+      onColorChange();
+    } catch (error) {
+      console.error('Error removing tag:', error);
+    }
+  };
+
+  return (
+    <Box sx={{ p: 2 }}>
+      <Typography variant="h6" sx={{ mb: 2 }}>Tag Color Manager</Typography>
+      
+      {/* Add new tag section */}
+      <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mb: 2 }}>
+        <TextField
+          size="small"
+          value={newTagName}
+          onChange={(e) => setNewTagName(e.target.value)}
+          placeholder="New tag name"
+        />
+        <Button 
+          variant="contained" 
+          onClick={handleAddTag}
+          disabled={!newTagName.trim()}
+        >
+          Add Tag
+        </Button>
+      </Box>
+
+      {/* Tag list */}
+      <Box className="tagList" sx={{ mb: 2 }}>
+        {Object.keys(tagColors).map((tag, index) => (
+          <Chip
+            key={index}
+            label={tag}
+            size="small"
+            onDelete={() => handleRemoveTag(tag)}
+            sx={{
+              backgroundColor: tag === selectedTag ? 'white' : tagColors[tag],
+              border: tag === selectedTag ? `4px solid ${tagColors[tag]}` : 'none',
+              boxShadow: tag === selectedTag ? 3 : 0,
+              transform: tag === selectedTag ? 'scale(1.2)' : 'scale(1)',
+              transition: 'all 0.2s ease-in-out',
+              margin: '4px'
+            }}
+            onClick={() => handleTagSelect(tag)}
+          />
+        ))}
+      </Box>
+
+      {/* Color picker */}
+      {selectedTag && (
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+          <MuiColorInput
+            value={selectedColor}
+            onChange={handleColorChange}
+            format="hex"
+          />
+          <Button 
+            variant="contained" 
+            onClick={handleSave}
+            disabled={!selectedColor}
+          >
+            Save Color
+          </Button>
+        </Box>
+      )}
+    </Box>
   );
 };
 
@@ -593,7 +740,7 @@ const App = () => {
   };
 
   return (
-    <Box sx={{ display: 'flex', gap: 4, alignItems: 'top', p:4}}>
+    <Box sx={{ display: 'flex', gap: 4, alignItems: 'top', p:4 }}>
       <Snackbar
         anchorOrigin={{ vertical: state.vertical, horizontal: state.horizontal }}
         open={state.open}
@@ -759,6 +906,15 @@ const App = () => {
             duration={currentSong.duration} 
           />
         </Box>
+
+        {loggedInUser && loggedInUser.username === 'admin' && (
+          <Box sx={{ marginTop: 2, borderRadius: 5, backgroundColor: '#F7F7F7' }} component={Paper}>
+            <TagColorChanger 
+              tagColors={tagColors} 
+              onColorChange={() => fetchTags()} 
+            />
+          </Box>
+        )}
       </Box>
 
       <Box sx={{id: 'right-panel', display: 'inline', width: '70%', margin: 'auto'}}>

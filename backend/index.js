@@ -205,6 +205,72 @@ app.get('/queue/tags', (req, res) => {
   });
 });
 
+// Update tag color
+app.post('/queue/tags/color', authenticateToken, (req, res) => {
+  const { tag, color } = req.body;
+  
+  // Check if user is admin
+  if (req.user.username !== 'admin') {
+    return res.status(403).json({ error: 'Only admin can change tag colors' });
+  }
+
+  dbTagColors.run(
+    `UPDATE tagColors SET color = ? WHERE tag = ?`,
+    [color, tag],
+    (err) => {
+      if (err) {
+        return res.status(500).json({ error: 'Failed to update tag color' });
+      }
+      res.json({ message: 'Tag color updated successfully' });
+      sendFetchNotification();
+    }
+  );
+});
+
+// Add new tag
+app.post('/queue/tags/add', authenticateToken, (req, res) => {
+  const { tag, color } = req.body;
+  
+  // Check if user is admin
+  if (req.user.username !== 'admin') {
+    return res.status(403).json({ error: 'Only admin can add tags' });
+  }
+
+  dbTagColors.run(
+    `INSERT INTO tagColors (tag, color) VALUES (?, ?)`,
+    [tag, color],
+    (err) => {
+      if (err) {
+        return res.status(500).json({ error: 'Failed to add tag' });
+      }
+      res.json({ message: 'Tag added successfully' });
+      sendFetchNotification();
+    }
+  );
+});
+
+// Remove tag
+app.post('/queue/tags/remove', authenticateToken, (req, res) => {
+  const { tag } = req.body;
+  
+  // Check if user is admin
+  if (req.user.username !== 'admin') {
+    return res.status(403).json({ error: 'Only admin can remove tags' });
+  }
+
+  dbTagColors.run(
+    `DELETE FROM tagColors WHERE tag = ?`,
+    [tag],
+    (err) => {
+      if (err) {
+        return res.status(500).json({ error: 'Failed to remove tag' });
+      }
+      res.json({ message: 'Tag removed successfully' });
+      sendFetchNotification();
+    }
+  );
+});
+
 
 
 
