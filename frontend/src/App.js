@@ -1,39 +1,62 @@
 import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
-import Table from '@mui/material/Table';
-import TableBody from '@mui/material/TableBody';
-import TableCell from '@mui/material/TableCell';
-import TableContainer from '@mui/material/TableContainer';
-import TableHead from '@mui/material/TableHead';
-import TableRow from '@mui/material/TableRow';
-import Paper from '@mui/material/Paper';
-import { Box, Button, TextField, LinearProgress, Typography } from '@mui/material';
+
+// Custom functions
+import useSnackbar from './additional functions/snackbar';
+
+// Material-UI Components
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  Box,
+  Button,
+  TextField,
+  LinearProgress,
+  Typography,
+  Chip,
+  Autocomplete,
+  FormControlLabel,
+  Checkbox,
+  Stack,
+  Slider,
+  IconButton,
+  Fab,
+  CircularProgress,
+  Snackbar,
+  Alert,
+  Tooltip,
+} from '@mui/material';
+
+// Material-UI Icons
 import DeleteIcon from '@mui/icons-material/Delete';
 import SkipNextIcon from '@mui/icons-material/SkipNext';
 import SkipPreviousIcon from '@mui/icons-material/SkipPrevious';
 import InsertLinkIcon from '@mui/icons-material/InsertLink';
 import CheckIcon from '@mui/icons-material/Check';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
-import CircularProgress from '@mui/material/CircularProgress';
 import DoneAllIcon from '@mui/icons-material/DoneAll';
 import QueueIcon from '@mui/icons-material/Queue';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
-import Fab from '@mui/material/Fab';
-import IconButton from '@mui/material/IconButton';
 import CloseIcon from '@mui/icons-material/Close';
-import FormControlLabel from '@mui/material/FormControlLabel';
-import Checkbox from '@mui/material/Checkbox';
 import UpdateIcon from '@mui/icons-material/Update';
-import Stack from '@mui/material/Stack';
-import Slider from '@mui/material/Slider';
 import VolumeDown from '@mui/icons-material/VolumeDown';
 import VolumeUp from '@mui/icons-material/VolumeUp';
+
+// Fonts
 import '@fontsource/roboto';
+
+// External CSS or Links
 <link
   rel="stylesheet"
   href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap"
 />
+
 
 const LinearProgressWithLabel = ({ currentTime, duration }) => {
   // Format time (seconds) into mm:ss
@@ -57,13 +80,59 @@ const LinearProgressWithLabel = ({ currentTime, duration }) => {
   );
 };
 
+const LoginPopup = ({ onClose, onLogin }) => {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+
+  const handleLogin = async () => {
+      try {
+          const response = await axios.post('http://localhost:5000/api/login', { username, password });
+          localStorage.setItem('token', response.data.token); // Save the token in localStorage
+          onLogin({ username }); // Pass the logged-in user's data to the parent component
+      } catch (err) {
+          setError(err.response?.data?.error || 'Something went wrong');
+      }
+  };
+
+  return (
+      <Box className="popup">
+          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', marginTop: 2}}>
+              <TextField
+                  type="text"
+                  placeholder="Username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+              />
+              <TextField
+                  type="password"
+                  placeholder="Password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+              />
+              <Button variant='contained' onClick={handleLogin}>Login</Button>
+              {error && <p style={{ color: 'red' }}>{error}</p>}
+          </Box>
+      </Box>
+  );
+};
+
 
 const App = () => {
+  const { state, showSnackbar, handleClose } = useSnackbar();
   const [url, setUrl] = useState('');
   const [queue, setQueue] = useState([]);
+  const [availableTags, setAvailableTags] = useState([]);
+  const [selectedTags, setSelectedTags] = useState([]);
+  const [tagColors, setTagColors] = useState({});
   const [audioSrc, setAudioSrc] = useState(''); // State to manage the audio source
   const audioRef = useRef(null); // Reference to the audio player
-  const [statuses, setStatuses] = useState({});  // All statuses in one object
+  const [statuses, setStatuses] = useState({
+    // loopQueue: false,
+    randomizeQueue: false,
+    playState: 'pause',
+    filters: []  // Initialize empty Set
+  });
   const [currentSong, setCurrentSong] = useState({
     id: null,
     url: null,
@@ -75,6 +144,32 @@ const App = () => {
   const ws = useRef(null);
   const intervalRef = useRef(null);  // Use ref to store the interval ID
   const [volume, setVolume] = useState(70); // volume slider
+  const [showPopup, setShowPopup] = useState(false);
+  const [loggedInUser, setLoggedInUser] = useState(null); // Tracks logged-in user info
+  const [urlHelperText, setUrlHelperText] = useState(''); // Helper text for the URL input
+
+  useEffect(() => {
+    // Check if token exists in localStorage
+    const token = localStorage.getItem('token');
+    if (token) {
+        // Fetch user info from the backend
+        axios
+            .get('http://localhost:5000/api/userinfo', {
+                headers: { Authorization: `Bearer ${token}` },
+            })
+            .then((response) => {
+                setLoggedInUser(response.data); // Update the user info
+            })
+            .catch(() => {
+                localStorage.removeItem('token'); // Remove invalid token
+            });
+    }
+  }, []);
+
+  const handleLogout = () => {
+    setLoggedInUser(null); // Clear the user info on logout
+    localStorage.removeItem('token'); // Optionally clear token
+  };
 
   const pastelink = () => {
     const links = [
@@ -109,25 +204,62 @@ const App = () => {
       const response = await axios.get('http://localhost:5000/queue');
       setQueue(response.data);
     } catch (error) {
+      showSnackbar('Error connecting to server', 5000);
       console.error('Error fetching queue:', error.response?.data || error.message);
+    }
+  };
+
+  // Fetch all tags
+  const fetchTags = async () => {
+    try {
+      const response = await axios.get('http://localhost:5000/queue/tags');
+
+      setTagColors(response.data);  // Set the tag colors
+
+      // Convert the { tag: color } object into an array of tags
+      const tagsArray = Object.keys(response.data);
+
+      setAvailableTags(tagsArray);
+    } catch (error) {
+      console.error('Error fetching tags:', error.response?.data || error.message);
     }
   };
 
   // Add URL to the queue
   const addToQueue = async () => {
     try {
-      await axios.post('http://localhost:5000/queue/add', { url });
+      const token = localStorage.getItem('token');
+      await axios.post(
+        'http://localhost:5000/queue/add',
+        { url, tags: selectedTags }, // Request body
+        {
+            headers: {
+                Authorization: `Bearer ${token}`, // Add token to the Authorization header
+            },
+        }
+      );
       setUrl('');
+      setSelectedTags([]);
       fetchQueue();  // Refresh queue after adding
     } catch (error) {
-      console.error('Error adding to queue:', error.response?.data || error.message);
+      // console.error('Error adding to queue:', error.response?.data || error.message);
+      setUrlHelperText('Invalid URL');
     }
   };
 
   // Clear the entire queue
   const clearQueue = async () => {
     try {
-      await axios.post('http://localhost:5000/queue/clear');
+      const token = localStorage.getItem('token');
+      await axios.post(
+        'http://localhost:5000/queue/clear',
+        {}, // Empty object as body
+        {
+          headers: {
+            Authorization: `Bearer ${token}` // Headers go in the config object
+          }
+        }
+      );
       fetchQueue();  // Refresh queue after clearing
     } catch (error) {
       console.error('Error clearing queue:', error.response?.data || error.message);
@@ -146,6 +278,7 @@ const App = () => {
 
   useEffect(() => {
     fetchQueue();  // Fetch queue when the component loads
+    fetchTags();  // Fetch tags when the component loads
   
     // WebSocket setup
     ws.current = new WebSocket('ws://localhost:5000');
@@ -157,13 +290,25 @@ const App = () => {
     ws.current.onmessage = (event) => {
       let data;
       try {
-        data = JSON.parse(event.data);  // Parse incoming message
-        console.log(`[WS] Event: ${data.event}, Message: ${data.message}`);
+        data = JSON.parse(event.data);
+        let logMessage = `[WS] Event: ${data.event}`;
+        
+        // Handle object messages
+        if (typeof data.message === 'object' && data.message !== null) {
+          logMessage += '\nMessage:';
+          Object.entries(data.message).forEach(([key, value]) => {
+            logMessage += `\n  ${key}: ${JSON.stringify(value)}`;
+          });
+        } else {
+          logMessage += `, Message: ${data.message}`;
+        }
+        
+        console.log(logMessage);
       } catch (e) {
         console.error('Failed to parse event data:', event.data);
-        return;  // Exit if data is invalid
+        return;
       }
-  
+    
       let msg;
       try {
         msg = typeof data.message === 'string' ? JSON.parse(data.message) : data.message;
@@ -171,7 +316,7 @@ const App = () => {
         console.error('Invalid JSON in message:', data.message);
         msg = null;
       }
-  
+    
       switch (data.event) {
         case 'track-ended':
           console.log('The track has ended. Ready for the next track.');
@@ -184,17 +329,33 @@ const App = () => {
           }
           break;
   
-        case 'refresh':
+        case 'fetch':
           fetchQueue();
+          fetchTags();
           break;
   
         case 'play':
           if (audioRef.current) {
+            // First pause current playback
             audioRef.current.pause();
             if (audioRef.current.intervalId) {
               clearInterval(audioRef.current.intervalId);
             }
-  
+        
+            // Create the loadeddata handler
+            const handleLoadedData = () => {
+              if (msg.startTime) {
+                audioRef.current.currentTime = msg.startTime;
+              }
+              audioRef.current.play().catch((err) => {
+                console.error("Error playing audio:", err);
+              });
+            };
+        
+            // Add event listener before changing source
+            audioRef.current.addEventListener('loadeddata', handleLoadedData, { once: true });
+        
+            // Update states after setting up listener
             setAudioSrc(msg.audioUrl);
             setCurrentSong({
               id: msg.id,
@@ -202,26 +363,21 @@ const App = () => {
               title: msg.title,
               audiourl: msg.audioUrl,
               duration: msg.duration,
-              currentTime: 0,
+              currentTime: msg.startTime || 0,
             });
-  
-            const handleLoadedData = () => {
-              audioRef.current.play().catch((err) => {
-                console.error("Error playing audio:", err);
-              });
-            };
-  
-            audioRef.current.addEventListener('loadeddata', handleLoadedData);
-  
-            audioRef.current.onended = () => {
-              clearInterval(audioRef.current.intervalId);
-              audioRef.current.removeEventListener('loadeddata', handleLoadedData);
-            };
-  
+        
+            // Load the new audio
             audioRef.current.load();
+        
+            // Cleanup on track end
+            audioRef.current.onended = () => {
+              if (audioRef.current.intervalId) {
+                clearInterval(audioRef.current.intervalId);
+              }
+            };
           }
           break;
-
+  
           case 'statusUpdate':
             setStatuses(data.message); // Update all statuses
             break;
@@ -245,25 +401,18 @@ const App = () => {
   useEffect(() => {
     audioRef.current.load();
   }, [audioSrc]);
-  
-
-  const processUrl = async () => {
-    try {
-      const response = await axios.post(
-        'http://localhost:5000/process',
-        { url: url },
-        { headers: { 'Content-Type': 'application/json' } } // Ensure the header is set to JSON
-      );
-      console.log(response.data); // Log the response to see the audio URL
-    } catch (error) {
-      console.error('Error fetching audio URL:', error);
-    }
-  };
 
   const formatDuration = (durationInSeconds) => {
     if (!durationInSeconds) return '00:00';
-    const minutes = Math.floor(durationInSeconds / 60);
+    
+    const hours = Math.floor(durationInSeconds / 3600);
+    const minutes = Math.floor((durationInSeconds % 3600) / 60);
     const seconds = Math.floor(durationInSeconds % 60);
+    
+    if (hours > 0) {
+      return `${hours.toString().padStart(1, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
+    
     return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   };
 
@@ -306,8 +455,18 @@ const App = () => {
       }
     }else if (statuses.playState === 'pause'){
       try {
+        // Pause the HTML audio player
+        if (audioRef.current) {
+          audioRef.current.pause();
+        }
+
         async function pause(){
-          await axios.post('http://localhost:5000/queue/pause');
+          try{
+            await axios.post('http://localhost:5000/queue/pause');
+          }catch (error) {
+            console.error('Error pausing track:', error);
+          }
+          
         }
         pause(); //obejście problemu asynca
 
@@ -330,12 +489,21 @@ const App = () => {
       }
     };
 
-  }, [statuses]);
+  }, [statuses.playState]);
 
   const handleDelete = async (id) => {
     setQueue((prevQueue) => prevQueue.filter(item => item.id !== id));
     try {
-      await axios.post('http://localhost:5000/queue/remove', {id});
+      const token = localStorage.getItem('token');
+      await axios.post(
+        'http://localhost:5000/queue/remove',
+        { id }, // Request body
+        {
+            headers: {
+                Authorization: `Bearer ${token}`, // Add token to the Authorization header
+            },
+        }
+      );
       fetchQueue();  // Refresh queue after clearing
     } catch (error) {
       console.error('Error clearing queue:', error);
@@ -372,35 +540,159 @@ const App = () => {
     //TODO
   };
 
-  const statusKeys = Object.keys(statuses).filter((key) => key !== 'playState'); // Exclude button from checkbox loop
+  const handleTagsChange = (event, value) => {
+    // Trim whitespace from each tag and convert to lowercase for comparison
+    const trimmedTags = value.map((tag) => tag.trim().toLowerCase());
+  
+    // Remove duplicate tags
+    const uniqueTags = [...new Set(trimmedTags)];
+  
+    // Update the state with the cleaned and deduplicated tags
+    setSelectedTags(uniqueTags);
+  };
+
+  const tagColorFind = (tag) => {
+    return tagColors[tag] || "#CCCCCC"; // Default to light gray if the tag is not found
+  };
+
+  const handleTagFilter = (tag) => {
+    const currentFilters = Array.isArray(statuses.filters) ? statuses.filters : [];
+    const newFilters = currentFilters.includes(tag)
+      ? currentFilters.filter(t => t !== tag)
+      : [...currentFilters, tag];
+  
+    // Update state with new filters
+    setStatuses(prev => ({
+      ...prev,
+      filters: newFilters
+    }));
+  
+    // Send update via WebSocket if connected
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ 
+        type: 'statusUpdate', 
+        status: {"filters": newFilters} 
+      }));
+    }
+  };
+
+  const filteredQueue = queue.filter(item => {
+    // If no filters are set, show all items
+    if (!Array.isArray(statuses.filters) || statuses.filters.length === 0) {
+      return true;
+    }
+    // Show items that have at least one matching tag
+    return item.tags.some(tag => statuses.filters.includes(tag));
+  });
+
+  const statusKeys = Object.keys(statuses).filter((key) => key !== 'playState' && key !== 'filters'); // Exclude button from checkbox loop
+
+  const statusDisplayNames = {
+    randomizeQueue: 'Randomize',
+    loopQueue: 'Loop',
+  };
 
   return (
-    <Box sx={{ display: 'flex', gap: 2, alignItems: 'left' }}>
-      <Box sx={{ id: 'left-panel', display: 'inline', width: '30%', marginTop: '20px', p:4}}>
+    <Box sx={{ display: 'flex', gap: 4, alignItems: 'top', p:4}}>
+      <Snackbar
+        anchorOrigin={{ vertical: state.vertical, horizontal: state.horizontal }}
+        open={state.open}
+        onClose={handleClose}
+        message={state.message}
+        key={state.vertical + state.horizontal}
+      />
+      <Box sx={{ id: 'left-panel', display: 'inline', width: '30%', marginTop: '20px'}}>
+        <Box>
+          {loggedInUser ? (
+              <Box>
+                  <span>Welcome, {loggedInUser.username}</span>
+                  <Button onClick={handleLogout} style={{ marginLeft: '10px' }}>
+                      Logout
+                  </Button>
+              </Box>
+          ) : (
+            <Button onClick={() => setShowPopup(!showPopup)}>Sign In</Button>
+          )}
+          
+          {showPopup && (
+            <LoginPopup
+                onClose={() => setShowPopup(false)}
+                onLogin={(userInfo) => {
+                    setLoggedInUser(userInfo); // Update the logged-in user info
+                    setShowPopup(false);
+                }}
+            />
+          )}
+        </Box>
+        {loggedInUser ? (
         <Box sx={{id: 'control-buttons',  gap: 1, marginTop: 2, marginBottom: 2}}>
-          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', minHeight: '80px' }}>
             <TextField
               variant='outlined'
               size='small'
               type="text"
               value={url}
-              onChange={(e) => setUrl(e.target.value)}
+              onChange={(e) => {
+                setUrl(e.target.value)
+                setUrlHelperText('') // Clear the error message
+                }}
               placeholder="Enter YouTube URL"
+              helperText={urlHelperText}
+              error={Boolean(urlHelperText)} // Turns red if error exists
               sx={{ flex: 1 }}
             />
             <Button variant='contained' color='primary' onClick={addToQueue} startIcon={<QueueIcon />}>Add to Queue</Button>
+          </Box>
+
+          {/* Tags */}
+          <Box sx={{ marginTop: 2 }}>
+            <Autocomplete
+              multiple
+              id="tags-filled"
+              options={availableTags}
+              value={selectedTags}
+              freeSolo
+              onChange={handleTagsChange}
+              renderTags={(value, getTagProps) =>
+                value.map((option, index) => {
+                  const { key, ...tagProps } = getTagProps({ index });
+                  return (
+                    <Chip variant="outlined" label={option} key={key} {...tagProps} />
+                  );
+                })
+              }
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  variant="filled"
+                  label="Tags"
+                  placeholder="Press <enter> to add tags"
+                />
+              )}
+            />
           </Box>
           
           <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', marginTop: 2}}>
             <Button variant='contained' color='error' onClick={clearQueue} startIcon={<DeleteIcon />}>Clear Queue</Button>
             <Button variant='contained' color='primary' onClick={pasteTest} startIcon={<InsertLinkIcon />}>Paste test link</Button>
             {statusKeys.map((key) => (
-              <FormControlLabel key={key} control={<Checkbox checked={statuses[key]} onChange={handleCheckboxChange} name={key} />} label={key} />
+              <FormControlLabel 
+                key={key} 
+                control={
+                  <Checkbox 
+                    checked={statuses[key]} 
+                    onChange={handleCheckboxChange} 
+                    name={key} 
+                  />
+                } 
+                label={statusDisplayNames[key] || key}
+              />
             ))}
           </Box>
           {/* <Button variant='contained' color='primary' onClick={skipQueue} startIcon={<SkipNextIcon />}>Skip</Button> */}
           
         </Box>
+        ):( <Box></Box>)}
 
         <Box component={Paper} sx={{ backgroundColor: '#F7F7F7', padding: 2, textAlign: 'center', borderRadius: 5}}>
           <Typography variant="h6" sx={{ marginBottom: 1 }}>
@@ -410,6 +702,7 @@ const App = () => {
             {currentSong.title}
           </Typography>
 
+          {loggedInUser ? (
           <Stack 
             spacing={2} 
             direction="row" 
@@ -457,7 +750,7 @@ const App = () => {
             {/* Right section - Empty space */}
             <Box sx={{ flex: '1 1 33%' }} />
           </Stack>
-
+          ):( <Box></Box>)}
           
 
           <LinearProgressWithLabel 
@@ -467,76 +760,111 @@ const App = () => {
           />
         </Box>
       </Box>
-      
-      <TableContainer component={Paper} sx={{id: 'right-panel',  width: '70%', margin: 'auto', marginTop: '20px', marginRight:'20px', borderRadius: 5, p:4, fontFamily: 'Roboto', height: '85vh', overflowY: 'auto', paddingRight: '8px'}}>
-      <h2>Queue</h2>
-      <Table sx={{ minWidth: 650, width: '100%' }} aria-label="simple table">
-        <TableHead>
-          <TableRow>
-            <TableCell>ID</TableCell>
-            <TableCell>Title</TableCell>
-            <TableCell>URL</TableCell>
-            <TableCell>AudioURL</TableCell>
-            <TableCell>Duration</TableCell>
-            <TableCell>Status</TableCell>
-            <TableCell>Control</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {queue.map((item) => (
-            <TableRow key={item.id}>
-              <TableCell>{item.id}</TableCell>
-              <TableCell>{item.title}</TableCell>
-              <TableCell>{item.url}</TableCell>
-              <TableCell>
-                {typeof item.audioUrl === 'string' && item.audioUrl.startsWith('https:') ? (
-                  <CheckIcon color="success" />
-                ) : item.audioUrl ? (
-                  item.audioUrl
-                ) : isNaN ? (
-                  <CloseIcon color="warning"></CloseIcon>
-                ): (
-                  <Typography color="error">Error</Typography>
-                )}
-              </TableCell>
-              <TableCell>{formatDuration(item.duration)}</TableCell>
-              <TableCell>
-                {item.status === 'processing' ? (
-                  <CircularProgress size={24} />
-                ) : item.status === 'processed' ? (
-                  <CheckIcon color="success" />
-                ) : item.status === 'finished' ? (
-                  <DoneAllIcon color="success" />
-                ) : item.status === 'paused' ? (
-                  <PauseIcon color="primary" />
-                ) : item.status === 'pending' ? (
-                  <UpdateIcon color="success" />
-                ) : item.status === 'playing' ? (
-                  <PlayCircleIcon color="primary" />
-                ) : (
-                  item.status
-                )}
-              </TableCell>
-              <TableCell>
-              <IconButton aria-label="delete" size="small" onClick={() => handleDelete(item.id)}>
-                <DeleteIcon />
-              </IconButton>
-              <IconButton color="success" size="small" onClick={() => handlePlay(item.id)}>
-                <PlayArrowIcon />
-              </IconButton>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-      
-      
 
-      <audio controls ref={audioRef}>
-         <source src={audioSrc} type="audio/mpeg"/>
-          Your browser does not support the audio element.
-       </audio>
-      </TableContainer>
+      <Box sx={{id: 'right-panel', display: 'inline', width: '70%', margin: 'auto'}}>
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', justifyContent: 'center', marginTop: '20px'}}>
+          {Object.keys(tagColors).map((key, item) => (
+            <Chip
+              key={item} 
+              label={key} 
+              size="small"
+              sx={{
+                backgroundColor: Array.isArray(statuses.filters) && statuses.filters.includes(key) ? 'white' : tagColors[key],
+                border: Array.isArray(statuses.filters) && statuses.filters.includes(key) ? `4px solid ${tagColors[key]}` : 'none',
+                boxShadow: Array.isArray(statuses.filters) && statuses.filters.includes(key) ? 3 : 0,
+                transform: Array.isArray(statuses.filters) && statuses.filters.includes(key) ? 'scale(1.2)' : 'scale(1)',
+                transition: 'all 0.2s ease-in-out'
+              }}
+              onClick={() => handleTagFilter(key)}
+            />
+          ))}
+        </Box>
+        <TableContainer component={Paper} sx={{p:2, marginTop: '20px', marginRight:'20px', borderRadius: 5, fontFamily: 'Roboto', height: '80vh', overflowY: 'auto', paddingRight: '8px'}}>
+        <h2>Queue</h2>
+        <Table sx={{ minWidth: 650, width: '100%' }} aria-label="simple table">
+          <TableHead>
+            <TableRow>
+              <TableCell>ID</TableCell>
+              <TableCell>Title</TableCell>
+              <TableCell>URL</TableCell>
+              <TableCell>AudioURL</TableCell>
+              <TableCell>Duration</TableCell>
+              <TableCell>Tags</TableCell>
+              <TableCell>Status</TableCell>
+              {loggedInUser ? (
+              <TableCell>Controls</TableCell>
+              ):( null )}
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {filteredQueue
+              .map((item) => (
+                <TableRow key={item.id}>
+                  <TableCell>{item.id}</TableCell>
+                  <TableCell>{item.title}</TableCell>
+                  <TableCell width="10%">{item.url}</TableCell>
+                  <TableCell>
+                    {typeof item.audioUrl === 'string' && item.audioUrl.startsWith('https:') ? (
+                      <CheckIcon color="success" />
+                    ) : item.audioUrl ? (
+                      item.audioUrl
+                    ) : isNaN ? (
+                      <CloseIcon color="warning"></CloseIcon>
+                    ): (
+                      <Typography color="error">Error</Typography>
+                    )}
+                  </TableCell>
+                  <TableCell>{formatDuration(item.duration)}</TableCell>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                      {item.tags.map((tag, index) => (
+                        <Chip key={index} label={tag} size="small" style={{backgroundColor: tagColorFind(tag) }}/>
+                      ))}
+                    </Box>
+                  </TableCell>
+                  <TableCell>
+                    <Tooltip title={item.status}>
+                      {item.status === 'processing' ? (
+                        <CircularProgress size={24} />
+                      ) : item.status === 'processed' ? (
+                        <CheckIcon color="success" />
+                      ) : item.status === 'finished' ? (
+                        <DoneAllIcon color="success" />
+                      ) : item.status === 'paused' ? (
+                        <PauseIcon color="primary" />
+                      ) : item.status === 'pending' ? (
+                        <UpdateIcon color="success" />
+                      ) : item.status === 'playing' ? (
+                        <PlayCircleIcon color="primary" />
+                      ) : (
+                        item.status
+                      )}
+                    </Tooltip>
+                  </TableCell>
+                  {loggedInUser ? (
+                  <TableCell>
+                    <IconButton aria-label="delete" size="small" onClick={() => handleDelete(item.id)}>
+                      <DeleteIcon />
+                    </IconButton>
+                    <IconButton color="success" size="small" onClick={() => handlePlay(item.id)}>
+                      <PlayArrowIcon />
+                    </IconButton>
+                  </TableCell>
+                  ):( null )}
+                </TableRow>
+              ))
+            }
+          </TableBody>
+        </Table>
+        
+        
+
+        <audio controls ref={audioRef}>
+          <source src={audioSrc} type="audio/mpeg"/>
+            Your browser does not support the audio element.
+        </audio>
+        </TableContainer>
+      </Box>
     </Box>
     
   );
