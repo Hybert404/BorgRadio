@@ -168,7 +168,7 @@ app.post('/queue/remove', authenticateToken, (req, res) => {
 
 // Pause track
 app.post('/queue/pause', async (req, res) => {
-  await dbQueue.run(`UPDATE queue SET status = 'paused' WHERE status = 'playing'`, (err) => {
+  dbQueue.run(`UPDATE queue SET status = 'paused' WHERE status = 'playing'`, (err) => {
     if (err) return res.status(500).json({ error: 'Failed to pause the track' });
   });
 
@@ -184,11 +184,8 @@ app.post('/queue/resume', async (req, res) => {
     if (err) return res.status(500).json({ error: 'Failed to resume the track' });
   });
 
-  console.log(`[resume] Resuming track`);
   await play(_currentAudio.index);
-  console.log(`[resume] after Play`);
   sendFetchNotification();
-  console.log(`[resume] after sendFetchNotification`);
   res.json({ message: 'Track resumed' });
 });
 
@@ -261,6 +258,7 @@ const play = async (timestamp = 0) => {
       if (!isValid) {
           console.log(`[play] Refreshing expired audio URL for item ${item.id}`);
           await processSong(item);
+          item = getById(item.id); //refresh item after reprocessing
       }
 
       await dbQueue.run(`UPDATE queue SET status = 'playing' WHERE id = ?`, [item.id]);
@@ -333,6 +331,26 @@ const validateAudioUrl = async (item) => {
     console.log(`[validateAudioUrl] Error checking audioUrl: ${error.message}`);
     return false;
   }
+};
+
+// Get the row by id
+const getById = (id) => {
+  return new Promise((resolve, reject) => {
+    dbQueue.get(`SELECT * FROM queue WHERE id = ? ORDER BY id LIMIT 1`, [id], (err, item) => {
+      if (err) {
+        console.error('[getById] Error accessing db: ', err);
+        reject(err); // Reject the promise with the error
+        return;
+      }
+      if (!item) {
+        console.error(`[getById] No data with id =${id}: `, err);
+        reject(null); // Resolve with null
+        return;
+      }
+      console.log(`[getById] Found row with id=${id}`)
+      resolve(item); // Resolve with item
+    });
+  });
 };
 
 // shorten links from error messages
