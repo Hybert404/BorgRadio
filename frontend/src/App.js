@@ -89,7 +89,7 @@ const LoginPopup = ({ onClose, onLogin }) => {
 
   const handleLogin = async () => {
       try {
-          const response = await axios.post('http://localhost:5000/api/login', { username, password });
+          const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/login`, { username, password });
           localStorage.setItem('token', response.data.token); // Save the token in localStorage
           onLogin({ username }); // Pass the logged-in user's data to the parent component
       } catch (err) {
@@ -137,7 +137,7 @@ const TagColorChanger = ({ tagColors, onColorChange }) => {
     if (selectedTag && selectedColor) {
       try {
         const token = localStorage.getItem('token');
-        await axios.post('http://localhost:5000/queue/tags/color', 
+        await axios.post(`${process.env.REACT_APP_API_URL}/queue/tags/color`, 
           { 
             tag: selectedTag, 
             color: selectedColor 
@@ -159,7 +159,7 @@ const TagColorChanger = ({ tagColors, onColorChange }) => {
     if (newTagName.trim()) {
       try {
         const token = localStorage.getItem('token');
-        await axios.post('http://localhost:5000/queue/tags/add',
+        await axios.post(`${process.env.REACT_APP_API_URL}/queue/tags/add`,
           {
             tag: newTagName.trim().toLowerCase(),
             color: '#CCCCCC' // Default color
@@ -181,7 +181,7 @@ const TagColorChanger = ({ tagColors, onColorChange }) => {
   const handleRemoveTag = async (tagToRemove) => {
     try {
       const token = localStorage.getItem('token');
-      await axios.post('http://localhost:5000/queue/tags/remove',
+      await axios.post(`${process.env.REACT_APP_API_URL}/queue/tags/remove`,
         {
           tag: tagToRemove
         },
@@ -301,7 +301,7 @@ const App = () => {
     if (token) {
         // Fetch user info from the backend
         axios
-            .get('http://localhost:5000/api/userinfo', {
+            .get(`${process.env.REACT_APP_API_URL}/api/userinfo`, {
                 headers: { Authorization: `Bearer ${token}` },
             })
             .then((response) => {
@@ -348,7 +348,7 @@ const App = () => {
   // Fetch the current queue from the server
   const fetchQueue = async () => {
     try {
-      const response = await axios.get('http://localhost:5000/queue');
+      const response = await axios.get(`${process.env.REACT_APP_API_URL}/queue`);
 
       // Ensure queue is an array
       const queueData = Array.isArray(response.data) ? response.data : [];
@@ -364,7 +364,7 @@ const App = () => {
   // Fetch all tags
   const fetchTags = async () => {
     try {
-      const response = await axios.get('http://localhost:5000/queue/tags');
+      const response = await axios.get(`${process.env.REACT_APP_API_URL}/queue/tags`);
 
       setTagColors(response.data);  // Set the tag colors
 
@@ -382,7 +382,7 @@ const App = () => {
     try {
       const token = localStorage.getItem('token');
       await axios.post(
-        'http://localhost:5000/queue/add',
+        `${process.env.REACT_APP_API_URL}/queue/add`,
         { url, tags: selectedTags }, // Request body
         {
             headers: {
@@ -404,7 +404,7 @@ const App = () => {
     try {
       const token = localStorage.getItem('token');
       await axios.post(
-        'http://localhost:5000/queue/clear',
+        `${process.env.REACT_APP_API_URL}/queue/clear`,
         {}, // Empty object as body
         {
           headers: {
@@ -421,7 +421,7 @@ const App = () => {
   // Skip
   const skipQueue = async () => {
     try {
-      await axios.post('http://localhost:5000/queue/skip');
+      await axios.post(`${process.env.REACT_APP_API_URL}/queue/skip`);
       fetchQueue();  // Refresh queue after skipping
     } catch (error) {
       console.error('Error skipping queue:', error.response?.data || error.message);
@@ -433,7 +433,7 @@ const App = () => {
     fetchTags();  // Fetch tags when the component loads
   
     // WebSocket setup
-    ws.current = new WebSocket('ws://localhost:5000');
+    ws.current = new WebSocket(process.env.REACT_APP_WS_URL);
   
     ws.current.onopen = () => {
       console.log('Connected to server');
@@ -583,7 +583,7 @@ const App = () => {
     if(statuses.playState === 'play'){
       try {
         async function resume(){
-          await axios.post('http://localhost:5000/queue/resume');
+          await axios.post(`${process.env.REACT_APP_API_URL}/queue/resume`);
         }
         resume(); //obejście problemu asynca
         
@@ -614,7 +614,7 @@ const App = () => {
 
         async function pause(){
           try{
-            await axios.post('http://localhost:5000/queue/pause');
+            await axios.post(`${process.env.REACT_APP_API_URL}/queue/pause`);
           }catch (error) {
             console.error('Error pausing track:', error);
           }
@@ -648,7 +648,7 @@ const App = () => {
     try {
       const token = localStorage.getItem('token');
       await axios.post(
-        'http://localhost:5000/queue/remove',
+        `${process.env.REACT_APP_API_URL}/queue/remove`,
         { id }, // Request body
         {
             headers: {
