@@ -9,11 +9,13 @@ const app           = express();
 const server        = http.createServer(app);
 const wss           = new WebSocket.Server({ noServer: true });
 const bodyParser    = require('body-parser');
+const path          = require('path');
 
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(bodyParser.json());
+app.use(express.static(path.join(__dirname, '../frontend/build')));
 
 // Load route files
 app.use(require('./routes/userMgmt.js'));
@@ -93,6 +95,11 @@ var _currentAudio = new currentAudio({url: null})
 // ---------------------------ENDPOINTS----------------------------------
 
 // ------QUEUE-------
+
+// Serve the frontend
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, '../frontend/build', 'index.html'));
+});
 
 // Get the Current Queue
 app.get('/queue', (req, res) => {

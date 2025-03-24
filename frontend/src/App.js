@@ -349,8 +349,13 @@ const App = () => {
   const fetchQueue = async () => {
     try {
       const response = await axios.get('http://localhost:5000/queue');
-      setQueue(response.data);
+
+      // Ensure queue is an array
+      const queueData = Array.isArray(response.data) ? response.data : [];
+
+      setQueue(queueData);
     } catch (error) {
+      setQueue([]); // Set empty array on error
       showSnackbar('Error connecting to server', 5000);
       console.error('Error fetching queue:', error.response?.data || error.message);
     }
@@ -820,8 +825,12 @@ const App = () => {
           </Box>
           
           <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', marginTop: 2}}>
-            <Button variant='contained' color='error' onClick={clearQueue} startIcon={<DeleteIcon />}>Clear Queue</Button>
-            <Button variant='contained' color='primary' onClick={pasteTest} startIcon={<InsertLinkIcon />}>Paste test link</Button>
+          {loggedInUser && loggedInUser.username === 'admin' && (
+            <Box sx={{ display: 'flex', gap: 2, alignItems: 'center'}}>
+              <Button variant='contained' color='error' onClick={clearQueue} startIcon={<DeleteIcon />}>Clear Queue</Button>
+              <Button variant='contained' color='primary' onClick={pasteTest} startIcon={<InsertLinkIcon />}>Paste test link</Button>
+            </Box>
+          )}
             {statusKeys.map((key) => (
               <FormControlLabel 
                 key={key} 
